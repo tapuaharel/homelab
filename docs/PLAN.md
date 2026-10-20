@@ -83,9 +83,10 @@ talos-k8s/
     "tag:talos":        ["autogroup:admin"],
     "tag:k8s-operator": ["autogroup:admin"],
     "tag:k8s":          ["tag:k8s-operator"],
+    "tag:password-manager": ["tag:k8s-operator"],
   },
   ```
-  If the policy is not the default allow-all, also allow your user `tcp:50000,6443` to `tag:talos` and `tcp:443` to `tag:k8s`.
+  If the policy is not the default allow-all, also allow your user `tcp:50000,6443` to `tag:talos` and `tcp:443` to `tag:password-manager` (the Vaultwarden proxy, see Phase 3).
 - [ ] Create an **auth key** for the control plane: **reusable, pre-approved, tagged `tag:talos`, not ephemeral**. It has to be reusable because a Talos reset or reinstall wipes the node's Tailscale state.
 - [ ] Create an **OAuth client** for the operator with tag `tag:k8s-operator`, using the scopes the operator docs list for your version (at least Devices Core and Auth Keys, write access).
 
@@ -278,7 +279,11 @@ spec:
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
-metadata: { name: vaultwarden, namespace: vaultwarden }
+metadata:
+  name: vaultwarden
+  namespace: vaultwarden
+  annotations:
+    tailscale.com/tags: "tag:password-manager"   # own tag instead of the shared tag:k8s, so ACLs can target only this proxy
 spec:
   ingressClassName: tailscale
   defaultBackend:
