@@ -1,0 +1,5 @@
+machine:
+  network:
+    hostname: talos-w-1
+  install:
+    image: <worker installer URL from Image Factory>

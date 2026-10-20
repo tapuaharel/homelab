@@ -1,0 +1,13 @@
+# Talos generated configs: contain the cluster CA keys
+talos/controlplane.yaml
+talos/worker.yaml
+talos/talosconfig
+talos/secrets.yaml
+
+# Kubernetes credentials
+kubeconfig
+
+# age private keys and decrypted SOPS output
+*.agekey
+keys.txt
+*.dec.yaml
