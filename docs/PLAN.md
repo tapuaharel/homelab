@@ -10,6 +10,7 @@
 |---|---|---|
 | Cluster management | Control plane joins the tailnet using the official `siderolabs/tailscale` extension | No subnet routes needed; `talosctl` and `kubectl` work from anywhere on the tailnet |
 | App exposure | Tailscale Kubernetes operator, `ingressClassName: tailscale` | Works like the current Serve setup: tailnet-only, MagicDNS name, certificate issued by Tailscale |
+| First boot | Talos config delivered as Nocloud cloud-init user-data (Proxmox snippets) | No maintenance mode and no LAN access needed; everything runs over the tailnet |
 | URL | `https://vault.<tailnet>.ts.net` | Clean name; each client's server URL is changed once at cutover |
 | DNS | MagicDNS only | No local or public DNS records |
 | Not used | Own domain, Traefik, Gateway API, cert-manager, MetalLB, metrics-server, Renovate, vzdump | Not needed for a tailnet-only `ts.net` setup |
@@ -97,8 +98,14 @@ talos-k8s/
 
 ### Workstation
 - [ ] Install `talosctl`, `kubectl`, `helm`, `k9s`, `flux`, `sops` and `age`.
-- [ ] Make sure the workstation is on the tailnet, and on the LAN for the first setup.
+- [ ] Make sure the workstation is on the tailnet and can SSH to the Proxmox host (referred to as `pve` below).
 - [ ] Generate an age key (`age-keygen -o ~/.config/sops/age/keys.txt`) and replace `age1REPLACE_ME` in `.sops.yaml` with its public key. **Back up `keys.txt` off this machine**; without it the encrypted files can't be decrypted.
+
+### Proxmox host
+- [ ] Enable **Snippets** on the `local` storage (Datacenter → Storage → `local` → Content). Keep the existing content types; the shell equivalent must list all of them because it replaces the list:
+  ```bash
+  pvesm set local --content iso,vztmpl,backup,snippets
+  ```
 
 ### Proxmox VMs (create both, **do not start yet**)
 
@@ -109,27 +116,25 @@ talos-k8s/
 | Disk | VirtIO SCSI single |
 | QEMU guest agent | Enabled |
 | Start at boot | Yes |
-| Cloud-init drive | None (or IP config set to DHCP) |
+| Cloud-init drive | **`ide0` CloudInit drive**, IP config `ip=dhcp` |
+| Cloud-init custom user-data | **`cicustom user=local:snippets/<node>.yaml`** (the Talos machine config) |
 
 ```bash
-qm set <CP_VMID> --net0 virtio=02:00:0A:64:14:0A,bridge=vmbr0
-qm set <W_VMID>  --net0 virtio=02:00:0A:64:14:0B,bridge=vmbr0
-qm config <VMID> | grep ^net    # verify
+qm set 201 --net0 virtio=02:00:0A:64:14:0A,bridge=vmbr0
+qm set 202 --net0 virtio=02:00:0A:64:14:0B,bridge=vmbr0
+qm set 201 --ide0 local-lvm:cloudinit --ipconfig0 ip=dhcp --cicustom user=local:snippets/talos-cp-1.yaml
+qm set 202 --ide0 local-lvm:cloudinit --ipconfig0 ip=dhcp --cicustom user=local:snippets/talos-w-1.yaml
+qm config 201    # verify net0, ide0, cicustom
 ```
 - [ ] Create both **DHCP reservations** (MAC → IP) on the router.
-- [ ] Boot both VMs from the nocloud ISO.
 
-**Done when:** each node is in maintenance mode on its reserved IP.
-```bash
-talosctl get addresses --insecure -n 10.100.20.10
-talosctl get links --insecure -n 10.100.20.10    # MAC matches the reservation
-```
+**Done when:** both VMs exist (still stopped) with the cloud-init drive and `cicustom` set, both DHCP reservations are in place, and snippets are enabled on `local`.
 
 ---
 
 ## 3. Phase 1: Build the Talos cluster
 
-The first setup happens over the **LAN**. From then on the cluster is managed over the tailnet.
+The nodes read their Talos config from the cloud-init drive on first boot, install themselves, and the control plane joins the tailnet. Everything runs from the workstation over the tailnet; no LAN access is needed.
 
 ### Patches
 
@@ -161,46 +166,58 @@ environment:
 
 > Newer Talos releases are moving network settings such as the hostname into separate config documents. Check the docs for your version.
 
-### Bootstrap (from the LAN)
+### Step 1: Generate the configs (locally, before the first boot)
 
 ```bash
 cd talos
 talosctl gen secrets -o secrets.yaml
 talosctl gen config homelab https://10.100.20.10:6443 \
   --with-secrets secrets.yaml --config-patch @patches/common.yaml
+```
 
-talosctl apply-config --insecure -n 10.100.20.10 -f controlplane.yaml \
-  --config-patch @<(sops -d patches/talos-cp-1.sops.yaml)
-talosctl apply-config --insecure -n 10.100.20.11 -f worker.yaml \
-  --config-patch @patches/talos-w-1.yaml
+### Step 2: Upload the patched configs as snippets
 
-talosctl --talosconfig ./talosconfig config endpoint 10.100.20.10
+Patch on the workstation and stream straight to the Proxmox host, so no patched plaintext file is written locally. `umask 077` keeps the snippets readable by root only.
+```bash
+talosctl machineconfig patch controlplane.yaml --patch @<(sops -d patches/talos-cp-1.sops.yaml) \
+  | ssh pve 'umask 077; cat > /var/lib/vz/snippets/talos-cp-1.yaml'
+talosctl machineconfig patch worker.yaml --patch @patches/talos-w-1.yaml \
+  | ssh pve 'umask 077; cat > /var/lib/vz/snippets/talos-w-1.yaml'
+```
+
+### Step 3: Boot and bootstrap over the tailnet
+
+```bash
+ssh pve 'qm start 201 && qm start 202'
+# Wait a few minutes: install → reboot → talos-cp-1 appears in the admin console tagged tag:talos
+
+talosctl --talosconfig ./talosconfig config endpoint talos-cp-1.<tailnet>.ts.net
 talosctl --talosconfig ./talosconfig config node 10.100.20.10
 talosctl bootstrap        # ONCE, control plane only
 talosctl kubeconfig
-kubectl get nodes -o wide
-```
-
-### Switch management to the tailnet
-
-```bash
-# talos-cp-1 should now appear in the admin console tagged tag:talos
-talosctl config endpoint talos-cp-1.<tailnet>.ts.net
-talosctl -n 10.100.20.11 version     # the worker is reached through the control plane, no tailnet needed on it
 kubectl config set-cluster homelab --server=https://talos-cp-1.<tailnet>.ts.net:6443
+kubectl get nodes -o wide
+talosctl -n 10.100.20.11 version     # the worker is reached through the control plane, no tailnet needed on it
 ```
 
 The cluster endpoint stays `10.100.20.10` for internal traffic. Only the workstation uses the tailnet name, and the cert SANs make that name valid for TLS.
 
-Afterwards, encrypt the Talos secrets and remove the plaintext copy:
+> If `talos-cp-1` never appears on the tailnet, open its Proxmox console. The Talos dashboard shows the IP it received, whether the install finished, and Tailscale errors such as a bad auth key.
+
+### Step 4: Clean up
+
+Once both nodes are `Ready`, Talos keeps its config on its own disk, so remove the plaintext configs from the Proxmox host, detach the cloud-init drives and the ISO, and encrypt the Talos secrets:
 ```bash
+ssh pve 'rm /var/lib/vz/snippets/talos-cp-1.yaml /var/lib/vz/snippets/talos-w-1.yaml
+         qm set 201 --delete ide0,cicustom,ide2
+         qm set 202 --delete ide0,cicustom,ide2'
 sops -e secrets.yaml > secrets.sops.yaml && rm secrets.yaml
 ```
 
 **Done when:**
 - [ ] `kubectl get nodes -o wide` shows both nodes `Ready`, with `INTERNAL-IP` set to the **10.100.20.x** addresses (not 100.x)
-- [ ] `talosctl health` and `kubectl get nodes` work **from off-LAN** (for example, a phone hotspot plus Tailscale)
-- [ ] `talosctl dashboard` works
+- [ ] `talosctl health`, `talosctl dashboard` and `kubectl` work from the workstation over the tailnet
+- [ ] The snippets are deleted, the cloud-init drives and ISO are detached, and `secrets.yaml` is encrypted
 
 ---
 
@@ -360,4 +377,4 @@ The files that matter are `db.sqlite3`, `rsa_key*`, `attachments/`, `sends/` and
 |---|---|
 | `talosctl upgrade` each node **with its own installer image** (control plane: the tailscale schematic) | Immutable OS upgrades; the extension survives the upgrade |
 | `talosctl upgrade-k8s` | Kubernetes version upgrades |
-| Delete both VMs and rebuild from Git + backup, entirely over the tailnet after the first LAN apply | Whether everything can be rebuilt from the repo and backups alone |
+| Delete both VMs, recreate them (Phase 0), re-run Phase 1 steps 2–4 and restore the Vaultwarden backup, entirely over the tailnet | Whether everything can be rebuilt from the repo and backups alone |
