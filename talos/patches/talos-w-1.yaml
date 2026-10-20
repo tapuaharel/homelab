@@ -2,4 +2,4 @@ machine:
   network:
     hostname: talos-w-1
   install:
-    image: <worker installer URL from Image Factory>
+    image: factory.talos.dev/nocloud-installer/17bd088c71807ae797c16e85efb133b27814f1a333312bf597c3d4bc6f7c13d7:v1.14.4

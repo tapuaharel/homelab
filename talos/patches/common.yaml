@@ -8,7 +8,7 @@ machine:
         source: /var/local-path-provisioner
         options: [bind, rshared, rw]
     nodeIP:
-      validSubnets: [10.100.20.0/24]   # keep Kubernetes on the LAN, not tailscale0
+      validSubnets: [10.100.20.0/24]
 cluster:
   etcd:
     advertisedSubnets: [10.100.20.0/24]

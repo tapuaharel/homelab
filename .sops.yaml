@@ -1,9 +1,6 @@
-# Replace age1REPLACE_ME with your public key from: age-keygen -o ~/.config/sops/age/keys.txt
 creation_rules:
-  # Talos patches and secrets: encrypt the whole file
   - path_regex: talos/.*\.sops\.yaml$
-    age: age1REPLACE_ME
-  # Kubernetes Secrets: encrypt only the values so Flux can still read the metadata
+    age: age1hr3enuhkuy8txv3u779pa789f2vsasn2z959tgwhy52r7cdhdershlhxdf
   - path_regex: (infrastructure|apps)/.*\.sops\.yaml$
     encrypted_regex: ^(data|stringData)$
-    age: age1REPLACE_ME
+    age: age1hr3enuhkuy8txv3u779pa789f2vsasn2z959tgwhy52r7cdhdershlhxdf
