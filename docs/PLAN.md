@@ -216,10 +216,44 @@ cmp <(sops -d secrets.sops.yaml) secrets.yaml && rm secrets.yaml
 ## 4. Phase 2: Platform
 
 ### 4.1 local-path-provisioner
-- Label its namespace `pod-security.kubernetes.io/enforce=privileged`; Talos's baseline pod security policy blocks its helper pods otherwise.
-- Point it at `/var/mnt/local-path-provisioner` (the Talos user volume on the worker) and make it the default StorageClass.
+Gives the cluster a default StorageClass: each PVC becomes a directory under `/var/mnt/local-path-provisioner` (the Talos user volume on the worker). `infrastructure/local-path-provisioner/kustomization.yaml` pulls the pinned upstream manifest and patches it to:
+- label the namespace `pod-security.kubernetes.io/enforce=privileged` (Talos's baseline policy blocks the hostPath helper pods otherwise),
+- use the user-volume path instead of `/opt/local-path-provisioner` (read-only on Talos),
+- make `local-path` the default StorageClass with `reclaimPolicy: Retain`.
 
-**Done when:** a test PVC binds once a pod uses it.
+```bash
+kubectl apply -k infrastructure/local-path-provisioner
+kubectl -n local-path-storage rollout status deploy/local-path-provisioner
+kubectl get storageclass          # local-path (default)
+```
+
+Test it:
+```bash
+kubectl apply -f - <<'EOF'
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: test-pvc}
+spec: {accessModes: [ReadWriteOnce], resources: {requests: {storage: 100Mi}}}
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: test-pod}
+spec:
+  containers:
+    - name: c
+      image: busybox
+      command: [sh, -c, "echo hello > /data/hi && sleep 3600"]
+      volumeMounts: [{name: d, mountPath: /data}]
+      securityContext: {allowPrivilegeEscalation: false, runAsNonRoot: true, runAsUser: 1000, capabilities: {drop: [ALL]}, seccompProfile: {type: RuntimeDefault}}
+  volumes: [{name: d, persistentVolumeClaim: {claimName: test-pvc}}]
+EOF
+kubectl get pvc test-pvc          # Pending until the pod is scheduled, then Bound
+kubectl exec test-pod -- cat /data/hi
+kubectl delete pod test-pod && kubectl delete pvc test-pvc
+kubectl get pv                    # Retain leaves the PV "Released"; delete it by hand
+```
+
+**Done when:** the test PVC binds once the pod uses it and the file is readable.
 
 ### 4.2 Tailscale Kubernetes operator
 Store the OAuth client ID and secret (shown only once) in your password manager **and** SOPS-encrypted in the repo. Create the file inside the `sops` editor so the plaintext never touches disk:
