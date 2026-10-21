@@ -1,4 +1,4 @@
 apiVersion: v1alpha1
 kind: KubeNodeConfig
 nodeIP:
-  validSubnets: [10.100.20.0/24]   # keep Kubernetes on the LAN, not tailscale0
+  validSubnets: [10.220.20.0/24]   # keep Kubernetes on the LAN, not tailscale0
