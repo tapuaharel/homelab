@@ -34,8 +34,8 @@ Expected worker usage: the Tailscale operator and Vaultwarden's proxy pod about 
 
 | Address | Use |
 |---|---|
-| `10.220.20.10` | `talos-cp-1`: DHCP reservation for MAC `02:00:0A:DC:14:0A` |
-| `10.220.20.11` | `talos-w-1`: DHCP reservation for MAC `02:00:0A:DC:14:0B` |
+| `10.220.20.56` | `talos-cp-1`: DHCP reservation for its Proxmox-generated MAC |
+| `10.220.20.57` | `talos-w-1`: DHCP reservation for its Proxmox-generated MAC |
 | `talos-cp-1.<tailnet>.ts.net` | Talos API (50000) and Kubernetes API (6443) over the tailnet |
 | `vault.<tailnet>.ts.net` | Vaultwarden (443, Tailscale-issued certificate) |
 
@@ -121,8 +121,6 @@ talos-k8s/
 | Cloud-init custom user-data | **`cicustom user=local:snippets/<node>.yaml`** (the Talos machine config) |
 
 ```bash
-qm set 201 --net0 virtio=02:00:0A:DC:14:0A,bridge=vmbr0
-qm set 202 --net0 virtio=02:00:0A:DC:14:0B,bridge=vmbr0
 qm set 201 --ide0 local-lvm:cloudinit --ipconfig0 ip=dhcp --cicustom user=local:snippets/talos-cp-1.yaml
 qm set 202 --ide0 local-lvm:cloudinit --ipconfig0 ip=dhcp --cicustom user=local:snippets/talos-w-1.yaml
 qm config 201    # verify net0, ide0, cicustom
@@ -161,7 +159,7 @@ talosctl machineconfig patch controlplane.yaml --patch @patches/common.yaml --pa
 ```bash
 cd talos
 talosctl gen secrets -o secrets.yaml
-talosctl gen config homelab https://10.220.20.10:6443 --with-secrets secrets.yaml
+talosctl gen config homelab https://10.220.20.56:6443 --with-secrets secrets.yaml
 ```
 Don't pass `--config-patch` here: patches baked into the generated files can't be removed later. All patches are applied in step 2.
 
@@ -183,15 +181,15 @@ ssh pve 'qm start 201 && qm start 202'
 # Wait a few minutes: install → reboot → talos-cp-1 appears in the admin console tagged tag:talos
 
 talosctl --talosconfig ./talosconfig config endpoint talos-cp-1.<tailnet>.ts.net
-talosctl --talosconfig ./talosconfig config node 10.220.20.10
+talosctl --talosconfig ./talosconfig config node 10.220.20.56
 talosctl bootstrap        # ONCE, control plane only
 talosctl kubeconfig
 kubectl config set-cluster homelab --server=https://talos-cp-1.<tailnet>.ts.net:6443
 kubectl get nodes -o wide
-talosctl -n 10.220.20.11 version     # the worker is reached through the control plane, no tailnet needed on it
+talosctl -n 10.220.20.57 version     # the worker is reached through the control plane, no tailnet needed on it
 ```
 
-The cluster endpoint stays `10.220.20.10` for internal traffic. Only the workstation uses the tailnet name, and the cert SANs make that name valid for TLS.
+The cluster endpoint stays `10.220.20.56` for internal traffic. Only the workstation uses the tailnet name, and the cert SANs make that name valid for TLS.
 
 > If `talos-cp-1` never appears on the tailnet, open its Proxmox console. The Talos dashboard shows the IP it received, whether the install finished, and Tailscale errors such as a bad auth key.
 
