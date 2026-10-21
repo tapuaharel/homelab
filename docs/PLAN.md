@@ -26,7 +26,7 @@
 | Proxmox host overhead | – | ~2 GB | – | |
 | Existing Docker VM | as is | as is | – | Rollback until the cutover is proven |
 | `talos-cp-1` | 2 | 4 GB | 20 GB | Control plane, **on the tailnet** |
-| `talos-w-1` | 2 | 2 GB | 50 GB | All workloads and data (LAN only) |
+| `talos-w-1` | 2 | 2 GB | 30 GB | All workloads and data (LAN only): EPHEMERAL ≤ 15 GiB, local-path user volume ≥ 10 GiB |
 
 Expected worker usage: the Tailscale operator and Vaultwarden's proxy pod about 150–200 MB, local-path about 20 MB, Vaultwarden about 50 MB, Flux 300–500 MB. That's **roughly 0.5–0.8 GB of about 1.6 GB available to pods**. Set memory requests and limits on everything. If the worker runs out, move to a 3 GB / 3 GB split.
 
