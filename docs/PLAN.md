@@ -180,8 +180,10 @@ talosctl machineconfig patch worker.yaml --patch @patches/common.yaml --patch @p
 ssh pve 'qm start 201 && qm start 202'
 # Wait a few minutes: install → reboot → talos-cp-1 appears in the admin console tagged tag:talos
 
-talosctl --talosconfig ./talosconfig config endpoint talos-cp-1.<tailnet>.ts.net
-talosctl --talosconfig ./talosconfig config node 10.220.20.56
+export TALOSCONFIG=$PWD/talosconfig   # every talosctl call below uses it; ~/.talos/config stays empty
+chmod 600 talosconfig
+talosctl config endpoint talos-cp-1.<tailnet>.ts.net   # redo after every `gen config --force`, which resets it
+talosctl config node 10.220.20.56
 talosctl bootstrap        # ONCE, control plane only
 talosctl kubeconfig
 kubectl config set-cluster homelab --server=https://talos-cp-1.<tailnet>.ts.net:6443
