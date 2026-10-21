@@ -202,7 +202,8 @@ Once both nodes are `Ready`, Talos keeps its config on its own disk, so remove t
 ssh pve 'rm /var/lib/vz/snippets/talos-cp-1.yaml /var/lib/vz/snippets/talos-w-1.yaml
          qm set 201 --delete ide0,cicustom,ide2
          qm set 202 --delete ide0,cicustom,ide2'
-sops -e secrets.yaml > secrets.sops.yaml && rm secrets.yaml
+sops -e --filename-override secrets.sops.yaml secrets.yaml > secrets.sops.yaml   # rules match the output name, not secrets.yaml
+cmp <(sops -d secrets.sops.yaml) secrets.yaml && rm secrets.yaml
 ```
 
 **Done when:**
