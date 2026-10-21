@@ -222,12 +222,27 @@ cmp <(sops -d secrets.sops.yaml) secrets.yaml && rm secrets.yaml
 **Done when:** a test PVC binds once a pod uses it.
 
 ### 4.2 Tailscale Kubernetes operator
+Store the OAuth client ID and secret (shown only once) in your password manager **and** SOPS-encrypted in the repo. Create the file inside the `sops` editor so the plaintext never touches disk:
 ```bash
-helm repo add tailscale https://pkgs.tailscale.com/helmcharts
-helm upgrade --install tailscale-operator tailscale/tailscale-operator \
-  -n tailscale --create-namespace \
-  --set oauth.clientId=<id> --set oauth.clientSecret=<secret>
+sops infrastructure/tailscale-operator/operator-oauth.sops.yaml
+```
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: operator-oauth
+  namespace: tailscale
+stringData:
+  client_id: <id>
+  client_secret: <secret>
+```
+Create the Secret yourself and install the chart **without** `oauth.*` values. The chart then uses the existing `operator-oauth` Secret, so the secret stays out of shell history and out of Helm's release record. Flux uses the same file in Phase 6.
+```bash
+kubectl create namespace tailscale
 kubectl label ns tailscale pod-security.kubernetes.io/enforce=privileged
+sops -d infrastructure/tailscale-operator/operator-oauth.sops.yaml | kubectl apply -f -
+helm repo add tailscale https://pkgs.tailscale.com/helmcharts
+helm upgrade --install tailscale-operator tailscale/tailscale-operator -n tailscale
 ```
 > ⚠️ The operator creates its proxy pods in the `tailscale` namespace, and they need privileged access. Without the label they're silently rejected.
 
@@ -355,7 +370,7 @@ The files that matter are `db.sqlite3`, `rsa_key*`, `attachments/`, `sends/` and
 
 - [ ] `flux bootstrap github ...` against `talos-k8s`.
 - [ ] Create a `Kustomization` for `infrastructure`, and one for `apps` with `dependsOn: infrastructure`.
-- [ ] Move the Tailscale operator to a Flux `HelmRelease`, with the OAuth credentials in a SOPS-encrypted Secret.
+- [ ] Move the Tailscale operator to a Flux `HelmRelease` (same release name `tailscale-operator` and namespace `tailscale`, so Flux upgrades the existing release), reusing `operator-oauth.sops.yaml` from Phase 2.
 - [ ] Encrypt `vaultwarden-secrets` with SOPS and give Flux the age key (`sops-age` Secret in `flux-system`).
 - [ ] Check worker RAM in `talosctl dashboard` once Flux is running.
 
