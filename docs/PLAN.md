@@ -59,9 +59,10 @@ talos-k8s/
 ├── .sops.yaml
 ├── talos/
 │   ├── patches/
-│   │   ├── common.yaml               # install disk, kubelet mount, nodeIP/etcd subnets
-│   │   ├── talos-cp-1.sops.yaml      # hostname, installer image, cert SANs, Tailscale authkey (encrypted)
-│   │   └── talos-w-1.yaml            # hostname, installer image
+│   │   ├── common.yaml               # kubelet node IP subnet
+│   │   ├── talos-cp-1.yaml           # hostname, installer image, cert SANs, etcd subnet
+│   │   ├── talos-cp-1.sops.yaml      # Tailscale auth key (encrypted)
+│   │   └── talos-w-1.yaml            # hostname, installer image, local-path user volume
 │   └── secrets.sops.yaml
 ├── infrastructure/
 │   ├── local-path-provisioner/
@@ -138,50 +139,40 @@ The nodes read their Talos config from the cloud-init drive on first boot, insta
 
 ### Patches
 
-`talos/patches/common.yaml` (already in the repo): install disk, kubelet mount for local-path, and the LAN subnet for the kubelet and etcd.
+Talos v1.14 uses separate config documents (`HostnameConfig`, `UnattendedInstallConfig`, `KubeNodeConfig`, `KubeAPIServerConfig`, ...). The old `machine.install`, `machine.network.hostname`, `machine.kubelet` and `cluster.apiServer` fields are rejected next to them.
+
+| Patch | Applies to | Contents |
+|---|---|---|
+| `common.yaml` | both | `KubeNodeConfig`: kubelet node IP on the LAN subnet |
+| `talos-cp-1.yaml` | control plane | Talos API cert SAN, etcd LAN subnet, `HostnameConfig`, `UnattendedInstallConfig` (tailscale schematic), `KubeAPIServerConfig.certExtraSANs` |
+| `talos-cp-1.sops.yaml` | control plane | `ExtensionServiceConfig` for Tailscale (auth key). Edit only with `sops talos/patches/talos-cp-1.sops.yaml` |
+| `talos-w-1.yaml` | worker | `HostnameConfig`, `UnattendedInstallConfig`, EPHEMERAL capped at 15 GiB, `UserVolumeConfig` `local-path-provisioner` (mounted at `/var/mnt/local-path-provisioner`) |
 
 > ⚠️ With a second network interface (`tailscale0`), the kubelet and etcd might otherwise advertise the 100.x tailnet address. The worker can't reach that address, so the cluster breaks in confusing ways.
 
-`talos/patches/talos-cp-1.sops.yaml`: create it with `sops talos/patches/talos-cp-1.sops.yaml` so it is never written to disk in plaintext. It contains the auth key.
-```yaml
-machine:
-  network:
-    hostname: talos-cp-1
-  install:
-    image: <control-plane installer URL (with tailscale)>
-  certSANs: [talos-cp-1.<tailnet>.ts.net]
-cluster:
-  apiServer:
-    certSANs: [talos-cp-1.<tailnet>.ts.net]
----
-apiVersion: v1alpha1
-kind: ExtensionServiceConfig
-name: tailscale
-environment:
-  - TS_AUTHKEY=tskey-auth-XXXXXXXX
-  - TS_HOSTNAME=talos-cp-1
+Check any patch change before using it:
+```bash
+talosctl machineconfig patch controlplane.yaml --patch @patches/common.yaml --patch @patches/talos-cp-1.yaml \
+  --patch @<(sops -d patches/talos-cp-1.sops.yaml) | talosctl validate --config /dev/stdin --mode metal
 ```
-
-`talos/patches/talos-w-1.yaml` (already in the repo): fill in the worker installer URL.
-
-> Newer Talos releases are moving network settings such as the hostname into separate config documents. Check the docs for your version.
 
 ### Step 1: Generate the configs (locally, before the first boot)
 
 ```bash
 cd talos
 talosctl gen secrets -o secrets.yaml
-talosctl gen config homelab https://10.100.20.10:6443 \
-  --with-secrets secrets.yaml --config-patch @patches/common.yaml
+talosctl gen config homelab https://10.100.20.10:6443 --with-secrets secrets.yaml
 ```
+Don't pass `--config-patch` here: patches baked into the generated files can't be removed later. All patches are applied in step 2.
 
 ### Step 2: Upload the patched configs as snippets
 
 Patch on the workstation and stream straight to the Proxmox host, so no patched plaintext file is written locally. `umask 077` keeps the snippets readable by root only.
 ```bash
-talosctl machineconfig patch controlplane.yaml --patch @<(sops -d patches/talos-cp-1.sops.yaml) \
+talosctl machineconfig patch controlplane.yaml --patch @patches/common.yaml --patch @patches/talos-cp-1.yaml \
+  --patch @<(sops -d patches/talos-cp-1.sops.yaml) \
   | ssh pve 'umask 077; cat > /var/lib/vz/snippets/talos-cp-1.yaml'
-talosctl machineconfig patch worker.yaml --patch @patches/talos-w-1.yaml \
+talosctl machineconfig patch worker.yaml --patch @patches/common.yaml --patch @patches/talos-w-1.yaml \
   | ssh pve 'umask 077; cat > /var/lib/vz/snippets/talos-w-1.yaml'
 ```
 
@@ -225,7 +216,7 @@ sops -e secrets.yaml > secrets.sops.yaml && rm secrets.yaml
 
 ### 4.1 local-path-provisioner
 - Label its namespace `pod-security.kubernetes.io/enforce=privileged`; Talos's baseline pod security policy blocks its helper pods otherwise.
-- Point it at `/var/local-path-provisioner` and make it the default StorageClass.
+- Point it at `/var/mnt/local-path-provisioner` (the Talos user volume on the worker) and make it the default StorageClass.
 
 **Done when:** a test PVC binds once a pod uses it.
 

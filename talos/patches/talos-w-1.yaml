@@ -1,5 +1,28 @@
-machine:
-  network:
-    hostname: talos-w-1
-  install:
-    image: factory.talos.dev/nocloud-installer/17bd088c71807ae797c16e85efb133b27814f1a333312bf597c3d4bc6f7c13d7:v1.14.4
+apiVersion: v1alpha1
+kind: HostnameConfig
+auto: off
+hostname: talos-w-1
+---
+apiVersion: v1alpha1
+kind: UnattendedInstallConfig
+installer:
+  image: factory.talos.dev/nocloud-installer/17bd088c71807ae797c16e85efb133b27814f1a333312bf597c3d4bc6f7c13d7:v1.14.4
+provisioning:
+  diskSelector:
+    match: disk.dev_path == "/dev/sda"
+---
+# Cap EPHEMERAL so the system disk has room for the local-path user volume
+apiVersion: v1alpha1
+kind: VolumeConfig
+name: EPHEMERAL
+provisioning:
+  maxSize: 15GiB
+---
+# Mounted at /var/mnt/local-path-provisioner
+apiVersion: v1alpha1
+kind: UserVolumeConfig
+name: local-path-provisioner
+provisioning:
+  diskSelector:
+    match: system_disk
+  minSize: 10GiB

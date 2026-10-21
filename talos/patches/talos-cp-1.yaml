@@ -1,0 +1,22 @@
+machine:
+  certSANs: [talos-cp-1.taila07fc4.ts.net]
+cluster:
+  etcd:
+    advertisedSubnets: [10.100.20.0/24]   # keep etcd on the LAN, not tailscale0
+---
+apiVersion: v1alpha1
+kind: HostnameConfig
+auto: off
+hostname: talos-cp-1
+---
+apiVersion: v1alpha1
+kind: UnattendedInstallConfig
+installer:
+  image: factory.talos.dev/nocloud-installer/780d976716e800d05604b9dd8d41928a97c1ad38f36d4c8276d35984aa947865:v1.14.4
+provisioning:
+  diskSelector:
+    match: disk.dev_path == "/dev/sda"
+---
+apiVersion: v1alpha1
+kind: KubeAPIServerConfig
+certExtraSANs: [talos-cp-1.taila07fc4.ts.net]
