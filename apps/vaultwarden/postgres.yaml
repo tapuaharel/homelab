@@ -13,6 +13,8 @@ kind: Cluster
 metadata:
   name: vaultwarden-db
   namespace: vaultwarden
+  annotations:
+    kustomize.toolkit.fluxcd.io/prune: disabled
 spec:
   instances: 1
   enablePDB: false

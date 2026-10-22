@@ -67,10 +67,11 @@ talos-k8s/
 │   │   ├── talos-cp-1.sops.yaml      # Tailscale auth key (encrypted)
 │   │   └── talos-w-1.yaml            # hostname, installer image, local-path user volume
 │   └── secrets.sops.yaml
+├── clusters/homelab/                 # Flux: flux-system/ (bootstrap), infrastructure.yaml, apps.yaml
 ├── infrastructure/
 │   ├── local-path-provisioner/
-│   ├── tailscale-operator/           # HelmRelease + OAuth secret (SOPS)
-│   └── cnpg/                         # operator HelmRelease + values
+│   ├── tailscale-operator/           # Namespace, HelmRepository, HelmRelease, OAuth secret (SOPS)
+│   └── cnpg/                         # Namespace, HelmRepository, HelmRelease
 └── apps/
     └── vaultwarden/                  # ImageCatalog, Cluster, Deployment, PVC, Service, Ingress, Secret, backup CronJob
 ```
@@ -297,16 +298,13 @@ helm upgrade --install tailscale-operator tailscale/tailscale-operator -n tailsc
 **Done when:** `tailscale-operator` appears as a device in the admin console, tagged `tag:k8s-operator`.
 
 ### 4.3 CloudNativePG operator
-The operator watches `Cluster` resources and runs PostgreSQL for them: it creates the instance pod and PVC, the database and its owner, the credentials Secret, TLS certificates (its own CA, no cert-manager needed), and the `-rw` Service. Install it with the official Helm chart, **pinned**, in its own namespace. `infrastructure/cnpg/values.yaml`:
-```yaml
-resources:
-  requests: { cpu: 50m, memory: 128Mi }
-  limits:   { memory: 256Mi }
-```
+The operator watches `Cluster` resources and runs PostgreSQL for them: it creates the instance pod and PVC, the database and its owner, the credentials Secret, TLS certificates (its own CA, no cert-manager needed), and the `-rw` Service. Install it with the official Helm chart, **pinned**, in its own namespace, with resource limits. In Phase 5 the same values move into `infrastructure/cnpg/release.yaml`.
 ```bash
 helm repo add cnpg https://cloudnative-pg.github.io/charts
 helm upgrade --install cnpg cnpg/cloudnative-pg --version 0.29.1 \
-  -n cnpg-system --create-namespace -f infrastructure/cnpg/values.yaml   # chart 0.29.1 = operator 1.30.1
+  -n cnpg-system --create-namespace \
+  --set resources.requests.cpu=50m --set resources.requests.memory=128Mi \
+  --set resources.limits.memory=256Mi                                    # chart 0.29.1 = operator 1.30.1
 kubectl -n cnpg-system rollout status deploy/cnpg-cloudnative-pg
 kubectl get crd | grep postgresql.cnpg.io
 ```
@@ -529,16 +527,84 @@ Then clear `/data` before copying it again (in the `restore` pod: `rm -rf /data/
 
 ## 7. Phase 5: GitOps (Flux)
 
-- [ ] `flux bootstrap github ...` against `talos-k8s`.
-- [ ] Give Flux the age key (`sops-age` Secret in `flux-system`).
-- [ ] Create a `Kustomization` for `infrastructure`, and one for `apps` with `dependsOn: infrastructure` (the CNPG CRDs must exist before the `Cluster`).
-- [ ] Move both operators to Flux `HelmRelease`s with the **same release names and namespaces** (`tailscale-operator`/`tailscale`, `cnpg`/`cnpg-system`) so Flux upgrades the existing releases, and the same pinned CNPG chart version and values. Reuse `operator-oauth.sops.yaml`.
-- [ ] Add `vaultwarden-secrets.sops.yaml` (and the backup Secret) to `apps/vaultwarden/kustomization.yaml`; Flux decrypts them.
-- [ ] Check worker RAM in `talosctl dashboard` once Flux is running.
+Flux runs in the cluster, pulls `talos-k8s` from GitHub and makes the cluster match it. Afterwards, every change goes through git: a manual `kubectl edit` is reverted at the next sync. `talos/` stays manual (`talosctl`).
 
-> ⚠️ With `prune: true`, removing a manifest from git deletes the object. `Retain` keeps the volume data, but be careful with the `Cluster` and the PVC.
+### Files in the repo
 
-**Done when:** deleting the Vaultwarden Deployment by hand results in Flux recreating it within a minute.
+| Path | Contents |
+|---|---|
+| `clusters/homelab/flux-system/` | Written by `flux bootstrap` (Flux's own manifests and the git sync) |
+| `clusters/homelab/infrastructure.yaml` | Flux `Kustomization` → `./infrastructure`: `prune`, `wait`, SOPS decryption with `sops-age` |
+| `clusters/homelab/apps.yaml` | Flux `Kustomization` → `./apps`, same settings, `dependsOn: infrastructure` (the CNPG CRDs must exist before the `Cluster`) |
+| `infrastructure/kustomization.yaml` | `local-path-provisioner`, `tailscale-operator`, `cnpg` |
+| `infrastructure/cnpg/` | `Namespace`, `HelmRepository`, `HelmRelease` `cnpg` (chart `0.29.1`, the former `values.yaml` inline) |
+| `infrastructure/tailscale-operator/` | `Namespace` with the `privileged` label, `operator-oauth.sops.yaml`, `HelmRepository`, `HelmRelease` `tailscale-operator` (chart `1.104.1`, no values) |
+| `apps/kustomization.yaml` | `vaultwarden` |
+| `apps/vaultwarden/` | Now also lists `vaultwarden-secrets.sops.yaml`. The `Cluster` and the PVC carry `kustomize.toolkit.fluxcd.io/prune: disabled`, so Flux never deletes them, even if they disappear from git |
+
+The `HelmRelease`s use the **same release names, namespaces, chart versions and values** as the manual installs, so helm-controller upgrades the existing releases in place: nothing restarts, and `helm history` shows a new revision instead of a second install.
+
+### Step 1: Prerequisites
+```bash
+flux version --client      # v2.9.6
+flux check --pre
+```
+Create a GitHub **fine-grained token**, limited to `talos-k8s`, with **Contents: read/write** and **Administration: read/write** (to add the deploy key), expiring in 1 day. Bootstrap needs it once; afterwards Flux uses a read-only SSH deploy key.
+```bash
+read -s GITHUB_TOKEN && export GITHUB_TOKEN
+```
+
+### Step 2: Give Flux the age key (before bootstrap, so the first sync can decrypt)
+```bash
+kubectl create namespace flux-system
+kubectl -n flux-system create secret generic sops-age \
+  --from-file=age.agekey=$HOME/.config/sops/age/keys.txt
+```
+The only secret that never goes into git; recreate it by hand after a cluster rebuild.
+
+### Step 3: Bootstrap
+```bash
+git push                   # the files above must be on GitHub first
+flux bootstrap github \
+  --owner=tapuaharel --repository=talos-k8s --personal --private=true \
+  --branch=main --path=clusters/homelab
+git pull                   # bootstrap pushed clusters/homelab/flux-system/
+unset GITHUB_TOKEN         # and delete the token on GitHub
+```
+Bootstrap installs the controllers in `flux-system`, commits their manifests, adds the deploy key and starts syncing `clusters/homelab/`, which pulls in `infrastructure.yaml` and `apps.yaml`.
+
+### Step 4: Watch the takeover
+```bash
+flux get kustomizations --watch     # flux-system → infrastructure → apps reach Ready=True
+flux get helmreleases -A            # cnpg, tailscale-operator: Ready
+helm history cnpg -n cnpg-system    # a new revision by Flux, not a fresh install
+kubectl -n vaultwarden get pods     # no unexpected restarts
+```
+If something isn't Ready: `flux get kustomizations` (the message), `flux logs --level=error`, `kubectl -n cnpg-system describe helmrelease cnpg`. Typical causes: a missing `sops-age` Secret ("failed to decrypt"), a wrong path, a chart version that doesn't exist.
+
+### Step 5: Prove it
+```bash
+kubectl -n vaultwarden delete deploy vaultwarden
+flux reconcile kustomization apps --with-source
+kubectl -n vaultwarden get deploy                   # back
+kubectl -n vaultwarden scale deploy/vaultwarden --replicas=0
+flux reconcile kustomization apps                   # back to 1: git wins
+```
+Check worker RAM in `talosctl -n 10.220.20.57 dashboard`; the Flux controllers add about 300–500 MB.
+
+### Day to day
+
+| You want to... | Do this |
+|---|---|
+| Change anything | Edit, commit, push; `flux reconcile kustomization <name> --with-source` to apply now |
+| See what Flux does | `flux get all -A`, `flux events`, `flux tree kustomization apps` |
+| Change something by hand temporarily | `flux suspend kustomization apps` … `flux resume kustomization apps` (reverts to git) |
+| Upgrade an operator | Bump `version:` in its `release.yaml` |
+| Upgrade Flux | New CLI, run the same `flux bootstrap` again |
+
+> ⚠️ `prune: true` deletes objects whose files are removed from git. The `Cluster` and the Vaultwarden PVC are protected by the annotation; anything else you remove from git really goes.
+
+**Done when:** all three Kustomizations and both HelmReleases are Ready, and the deleted Deployment comes back on its own.
 
 ---
 
