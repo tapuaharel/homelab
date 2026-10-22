@@ -11,7 +11,7 @@
 | Cluster management | Control plane joins the tailnet using the official `siderolabs/tailscale` extension | No subnet routes needed; `talosctl` and `kubectl` work from anywhere on the tailnet |
 | App exposure | Tailscale Kubernetes operator, `ingressClassName: tailscale` | Works like the current Serve setup: tailnet-only, MagicDNS name, certificate issued by Tailscale |
 | First boot | Talos config delivered as Nocloud cloud-init user-data (Proxmox snippets) | No maintenance mode and no LAN access needed; everything runs over the tailnet |
-| URL | `https://vault.<tailnet>.ts.net` | Clean name; each client's server URL is changed once at cutover |
+| URL | `https://vault.<tailnet>.ts.net` | Clean name; each client's server URL is changed once at the migration |
 | Database | **CloudNativePG**, PostgreSQL 18, one instance. Data migrated from the current MySQL with pgloader | Declarative Postgres managed by an operator; learning goal. Deviations from CNPG's multi-node best practices are listed in Phase 3 |
 | Database backups | Nightly logical dump (`pg_dump`) + `/data`, off-host | Keeps cert-manager out; no point-in-time recovery |
 | DNS | MagicDNS only | No local or public DNS records |
@@ -26,7 +26,7 @@
 | VM | vCPU | RAM | Disk | Role |
 |---|---|---|---|---|
 | Proxmox host overhead | – | ~2 GB | – | |
-| Existing Docker VM | as is | as is | – | Rollback until the cutover is proven |
+| Existing Docker VM | as is | as is | – | Rollback until the migration and a restore drill are proven |
 | `talos-cp-1` | 2 | 4 GB | 20 GB | Control plane, **on the tailnet** |
 | `talos-w-1` | 2 | **4 GB** | 30 GB | All workloads and data (LAN only): EPHEMERAL ≤ 15 GiB, local-path user volume ≥ 10 GiB |
 
@@ -284,7 +284,7 @@ stringData:
   client_id: <id>
   client_secret: <secret>
 ```
-Create the Secret yourself and install the chart **without** `oauth.*` values. The chart then uses the existing `operator-oauth` Secret, so the secret stays out of shell history and out of Helm's release record. Flux uses the same file in Phase 6.
+Create the Secret yourself and install the chart **without** `oauth.*` values. The chart then uses the existing `operator-oauth` Secret, so the secret stays out of shell history and out of Helm's release record. Flux uses the same file in Phase 5.
 ```bash
 kubectl create namespace tailscale
 kubectl label ns tailscale pod-security.kubernetes.io/enforce=privileged
@@ -318,32 +318,31 @@ The chart installs the CRDs. The operator and its pods comply with the `restrict
 
 ---
 
-## 5. Phase 3: Vaultwarden rehearsal (production stays on Docker + Serve)
+## 5. Phase 3: Migrate Vaultwarden to Kubernetes
 
-The rehearsal runs at `https://vault-test.<tailnet>.ts.net` with a **copy** of the data. Production keeps running. The steps in 5.6 are the same ones used for the restore drill and the cutover, so repeat them until they're routine.
+A direct migration: stop the Docker service, move its data into the cluster, switch the clients. Vaultwarden is down from step 4 until step 9, typically 30–60 minutes. The Docker VM, its MariaDB and its data stay untouched, so rolling back means starting the old container again.
 
-### 5.1 Facts to collect on the Docker VM
-- [ ] **Exact Vaultwarden version:** `docker exec vaultwarden /vaultwarden --version`. Pin it in both `compose.yml` and the Deployment, and don't upgrade either until after the cutover. The empty Postgres schema must be created by the same version that wrote the MySQL data.
-- [ ] **Database server:** `ss -ltnp | grep 3306` (native or container?) and `mysql --version` (MariaDB or MySQL 8?). Production uses `DATABASE_URL=mysql://vaultwarden:...@127.0.0.1:3306/vaultwarden`.
-- [ ] **`/root/vaultwarden/vaultwarden-data/config.json`:** if it exists, it holds settings saved from `/admin`, and those **override environment variables** (`domain`, `admin_token`, `signups_allowed`, ...). Delete any key that is set through `env` in Kubernetes, or the rehearsal silently uses the old domain.
+### 5.1 Facts about production
 
-**Recorded (2026-10-22):** Vaultwarden **1.37.4**; database is a **native MariaDB 10.11.19** on the Docker VM (`127.0.0.1:3306`), the same major version the Vaultwarden wiki tested pgloader with. The MySQL 8 authentication workaround in 5.6 D isn't needed.
+Vaultwarden **1.37.4**; database is a **native MariaDB 10.11.19** on the Docker VM (`127.0.0.1:3306`), the same major version the Vaultwarden wiki tested pgloader with. Data folder: `/root/vaultwarden/vaultwarden-data`. Current URL: `https://vaultwarden.<tailnet>.ts.net` (Tailscale Serve).
 
 ### 5.2 Settings from `compose.yml`
 
 | Compose | Kubernetes |
 |---|---|
-| `image: vaultwarden/server:latest` | Pinned version from 5.1 |
-| `DOMAIN` | `env`, set per phase (`vault-test` now, `vault` at cutover) |
+| `image: vaultwarden/server:latest` | `1.37.4`, pinned on both sides; upgrade only after the migration |
+| `DOMAIN` | `env`: `https://vault.<tailnet>.ts.net` |
 | `SIGNUPS_ALLOWED=true` | `env: "false"`; invite users from `/admin` |
 | `DATABASE_URL` | `env` from the CNPG Secret `vaultwarden-db-app`, key `uri` |
-| `ADMIN_TOKEN` | `vaultwarden-secrets` (SOPS). Generate a **new** argon2 hash with `docker exec -it vaultwarden /vaultwarden hash`; write it with single `$` (the `$$` escaping is Compose-only) |
+| `ADMIN_TOKEN` | `vaultwarden-secrets` (SOPS). Generate a **new** argon2 hash with `docker exec -it vaultwarden /vaultwarden hash`; write it with single `$` (the `$$` escaping is Compose-only). Save the password you typed in your password manager |
 | `TZ=Asia/Jerusalem` | `env` |
 | `ROCKET_ADDRESS=127.0.0.1` | **Drop.** Bound to localhost, the Service can't reach the pod |
 | `ROCKET_PORT=8080` | Drop (default 80 matches the Service) |
 | `LOG_FILE` | Drop; logs go to stdout (`kubectl logs`) |
 | `RUST_BACKTRACE`, `EXTENDED_LOGGING`, `ENABLE_WEBSOCKET`, `LOG_LEVEL=info` | Drop (debug or already the default) |
 | `restart`, `container_name`, `network_mode: host` | Not needed |
+
+Don't save settings on the `/admin` settings pages afterwards: that writes `config.json`, which overrides the `env` values from git.
 
 ### 5.3 PostgreSQL with CloudNativePG: choices
 
@@ -369,157 +368,68 @@ The rehearsal runs at `https://vault-test.<tailnet>.ts.net` with a **copy** of t
 | `NetworkPolicy` limiting who can reach Postgres | None | Flannel doesn't enforce NetworkPolicy |
 
 ### 5.4 Manifests (`apps/vaultwarden/`)
-```yaml
-apiVersion: v1
-kind: Namespace
-metadata: { name: vaultwarden }
----
-apiVersion: postgresql.cnpg.io/v1
-kind: ImageCatalog
-metadata: { name: postgresql, namespace: vaultwarden }
-spec:
-  images:
-    - major: 18      # from cloudnative-pg/artifacts image-catalogs/catalog-minimal-trixie.yaml
-      image: ghcr.io/cloudnative-pg/postgresql:18.6-202610190957-minimal-trixie@sha256:0675340b02be838319b9b6f323c206693e519dcd62ec729d539be9f46bb7a2f9
----
-apiVersion: postgresql.cnpg.io/v1
-kind: Cluster
-metadata: { name: vaultwarden-db, namespace: vaultwarden }
-spec:
-  instances: 1
-  enablePDB: false
-  imageCatalogRef:
-    apiGroup: postgresql.cnpg.io
-    kind: ImageCatalog
-    name: postgresql
-    major: 18
-  bootstrap:
-    initdb:
-      database: vaultwarden
-      owner: vaultwarden
-  storage:
-    storageClass: local-path
-    size: 2Gi
-  postgresql:
-    parameters:
-      shared_buffers: 128MB
-      wal_level: replica
-  resources:
-    requests: { cpu: 500m, memory: 512Mi }
-    limits:   { cpu: 500m, memory: 512Mi }
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata: { name: vaultwarden-data, namespace: vaultwarden }
-spec:
-  accessModes: [ReadWriteOnce]
-  storageClassName: local-path
-  resources: { requests: { storage: 1Gi } }    # attachments, sends, rsa_key*; no database
----
-apiVersion: apps/v1
-kind: Deployment
-metadata: { name: vaultwarden, namespace: vaultwarden }
-spec:
-  replicas: 0                      # scaled by hand during the data load (5.6)
-  strategy: { type: Recreate }     # RWO volume, and never two versions migrating the schema at once
-  selector: { matchLabels: { app: vaultwarden } }
-  template:
-    metadata: { labels: { app: vaultwarden } }
-    spec:
-      containers:
-        - name: vaultwarden
-          image: vaultwarden/server:1.37.4
-          env:
-            - { name: DOMAIN, value: "https://vault-test.<tailnet>.ts.net" }
-            - { name: SIGNUPS_ALLOWED, value: "false" }
-            - { name: TZ, value: "Asia/Jerusalem" }
-            - name: DATABASE_URL
-              valueFrom: { secretKeyRef: { name: vaultwarden-db-app, key: uri } }
-          envFrom:
-            - secretRef: { name: vaultwarden-secrets }   # ADMIN_TOKEN (+ SMTP_PASSWORD if used)
-          ports: [{ name: http, containerPort: 80 }]
-          volumeMounts: [{ name: data, mountPath: /data }]
-          readinessProbe: { httpGet: { path: /alive, port: http } }
-          resources:
-            requests: { cpu: 50m, memory: 64Mi }
-            limits:   { memory: 256Mi }
-      volumes:
-        - name: data
-          persistentVolumeClaim: { claimName: vaultwarden-data }
----
-apiVersion: v1
-kind: Service
-metadata: { name: vaultwarden, namespace: vaultwarden }
-spec:
-  selector: { app: vaultwarden }
-  ports: [{ name: http, port: 80, targetPort: http }]
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: vaultwarden
-  namespace: vaultwarden
-  annotations:
-    tailscale.com/tags: "tag:password-manager"   # own tag instead of the shared tag:k8s, so ACLs can target only this proxy
-spec:
-  ingressClassName: tailscale
-  defaultBackend:
-    service: { name: vaultwarden, port: { number: 80 } }
-  tls:
-    - hosts: [vault-test]          # → https://vault-test.<tailnet>.ts.net
-```
-`kustomization.yaml` lists these manifests but **not** `vaultwarden-secrets.sops.yaml`: `kubectl apply -k` doesn't decrypt, so it would store ciphertext. Apply the secret by hand until Flux (Phase 6) decrypts it.
 
-The `vaultwarden` namespace keeps Talos's default `baseline` Pod Security level: Vaultwarden runs as root (allowed by `baseline`), and the CNPG pods meet `restricted`.
+| File | Contents |
+|---|---|
+| `namespace.yaml` | Namespace `vaultwarden` (Talos default `baseline` Pod Security: Vaultwarden runs as root, the CNPG pods meet `restricted`) |
+| `postgres.yaml` | `ImageCatalog` (PostgreSQL 18 by digest) and `Cluster` `vaultwarden-db` with the settings in 5.3 |
+| `pvc.yaml` | `vaultwarden-data`, 1 Gi: `rsa_key*`, `attachments/`, `sends/` |
+| `deployment.yaml` | Vaultwarden `1.37.4`, **`replicas: 0`** (scaled by hand during the migration), `Recreate`, `DATABASE_URL` from `vaultwarden-db-app` |
+| `service.yaml` | Port 80 |
+| `ingress.yaml` | `ingressClassName: tailscale`, tag `tag:password-manager`, host `vault` → `https://vault.<tailnet>.ts.net` |
+| `kustomization.yaml` | Lists the files above, **not** the secret: `kubectl apply -k` doesn't decrypt, so the secret is applied by hand until Flux (Phase 5) does it |
+| `vaultwarden-secrets.sops.yaml` | `ADMIN_TOKEN`, encrypted |
 
-### 5.5 Secret and first deploy
+### 5.5 Migration, step by step
+
+**Step 1: Prepare the Docker VM** (no downtime)
 ```bash
-sops apps/vaultwarden/vaultwarden-secrets.sops.yaml
+# compose.yml: image: vaultwarden/server:1.37.4
+docker compose up -d                                   # same version, nothing changes
+cat /root/vaultwarden/vaultwarden-data/config.json     # if it exists, remove keys now set by env (domain, admin_token, signups_allowed, ...)
+docker exec -it vaultwarden /vaultwarden hash          # new admin token for the cluster
 ```
-```yaml
-apiVersion: v1
-kind: Secret
-metadata: { name: vaultwarden-secrets, namespace: vaultwarden }
-stringData:
-  ADMIN_TOKEN: '$argon2id$v=19$m=...'
-```
+
+**Step 2: Before you start** (no downtime)
+- [ ] Export the vault: web vault → Tools → Export vault → `.json (Encrypted)`. Keep it off the cluster.
+- [ ] No tailnet device is already named `vault` (otherwise the proxy becomes `vault-1`).
+- [ ] If you use a **security key or passkey (WebAuthn)** for two-step login: it's tied to the domain and won't work on the new URL. Make sure an authenticator app or the recovery code works; re-register the key afterwards.
+- [ ] If the tailnet policy isn't allow-all: your user may reach `tcp:443` on `tag:password-manager`.
+- [ ] Warn other users of the vault about the downtime.
+
+**Step 3: Deploy the database and the app at 0 replicas** (no downtime)
 ```bash
-kubectl apply -k apps/vaultwarden                       # creates the namespace, database and app (0 replicas)
+sops apps/vaultwarden/vaultwarden-secrets.sops.yaml     # ADMIN_TOKEN: '$argon2id$...'
+kubectl apply -k apps/vaultwarden
 sops -d apps/vaultwarden/vaultwarden-secrets.sops.yaml | kubectl apply -f -
 kubectl cnpg status vaultwarden-db -n vaultwarden       # wait for "Cluster in healthy state"
-kubectl -n vaultwarden get secret vaultwarden-db-app    # generated credentials
-```
-If the tailnet policy isn't allow-all, allow your user `tcp:443` to `tag:password-manager`.
-
-### 5.6 Load the data (rehearsal, restore drill and cutover)
-
-The `/data` folder is copied with tar. The database moves from MySQL to PostgreSQL with **pgloader**, following the Vaultwarden wiki ("Using the PostgreSQL Backend" → "Migrating from MySQL to PostgreSQL"): Vaultwarden creates the empty schema itself, then pgloader copies **data only**.
-
-**A. Start from an empty database** (skip on the very first run):
-```bash
-kubectl -n vaultwarden scale deploy/vaultwarden --replicas=0
-kubectl -n vaultwarden delete cluster vaultwarden-db     # its PVC goes too; Retain keeps the PV as "Released"
-kubectl get pv | grep vaultwarden-db                     # delete that PV by hand
-kubectl apply -k apps/vaultwarden && kubectl cnpg status vaultwarden-db -n vaultwarden
+kubectl -n vaultwarden get ingress vaultwarden          # the "vault" device appears in the admin console
 ```
 
-**B. Copy `/data`:**
+**Step 4: Stop the old service** (downtime starts)
 ```bash
-# Docker VM (prod keeps running; these files rarely change)
+# Docker VM. MariaDB keeps running; nothing writes to it any more.
+docker compose stop vaultwarden
+tailscale serve reset          # or remove only Vaultwarden's handler if Serve fronts other services
+```
+Never run both at once, or the data diverges.
+
+**Step 5: Copy `/data`**
+```bash
+# Docker VM
 tar -czf /root/vw-data.tgz -C /root/vaultwarden/vaultwarden-data \
   --exclude='vaultwarden.log' --exclude='icon_cache' --exclude='db.sqlite3*' .
-# copy it to the workstation (scp over the tailnet), then:
+# copy /root/vw-data.tgz to the workstation (scp over the tailnet), then on the workstation:
 kubectl -n vaultwarden run restore --image=busybox --restart=Never \
   --overrides='{"spec":{"volumes":[{"name":"d","persistentVolumeClaim":{"claimName":"vaultwarden-data"}}],"containers":[{"name":"restore","image":"busybox","command":["sleep","3600"],"volumeMounts":[{"name":"d","mountPath":"/data"}]}]}}'
 kubectl -n vaultwarden wait --for=condition=Ready pod/restore
-kubectl -n vaultwarden exec restore -- sh -c 'rm -rf /data/* /data/.[!.]*'    # no leftovers from a previous run
 kubectl cp vw-data.tgz vaultwarden/restore:/data/
 kubectl -n vaultwarden exec restore -- sh -c 'tar -xzf /data/vw-data.tgz -C /data && rm /data/vw-data.tgz && ls -la /data'
 kubectl -n vaultwarden delete pod restore
 ```
-Expect `rsa_key.pem` (without it every client is logged out), `attachments/`, `sends/` and `config.json` if you kept one.
+Expect `rsa_key.pem` (without it every client is logged out), `attachments/`, `sends/`, and `config.json` if you kept one.
 
-**C. Let Vaultwarden create the schema, then stop it:**
+**Step 6: Let Vaultwarden create the empty schema, then stop it**
 ```bash
 kubectl -n vaultwarden scale deploy/vaultwarden --replicas=1
 kubectl -n vaultwarden rollout status deploy/vaultwarden
@@ -527,7 +437,7 @@ kubectl -n vaultwarden logs deploy/vaultwarden | head -30    # migrations ran, n
 kubectl -n vaultwarden scale deploy/vaultwarden --replicas=0
 ```
 
-**D. Run pgloader on the Docker VM.** MySQL listens on `127.0.0.1` there, so bring PostgreSQL to the VM through two tunnels:
+**Step 7: Copy the database with pgloader** (Vaultwarden wiki, "Using the PostgreSQL Backend" → "Migrating from MySQL to PostgreSQL"). MariaDB listens only on `127.0.0.1` on the Docker VM, so bring PostgreSQL to the VM through two tunnels:
 ```bash
 # Workstation, terminal 1
 kubectl -n vaultwarden port-forward svc/vaultwarden-db-rw 15432:5432
@@ -536,11 +446,11 @@ ssh -R 15432:127.0.0.1:15432 <docker-vm>
 # Workstation, terminal 3: the Postgres password for the load file
 kubectl -n vaultwarden get secret vaultwarden-db-app -o jsonpath='{.data.password}' | base64 -d; echo
 ```
-On the Docker VM (`umask 077`, so the passwords in the file stay private):
+On the Docker VM, with the MariaDB user and password from the production `DATABASE_URL`:
 ```bash
 umask 077; mkdir -p /root/pgloader && cat > /root/pgloader/vaultwarden.load <<'EOF'
 load database
-     from mysql://vaultwarden:<mysql-password>@127.0.0.1:3306/vaultwarden
+     from mysql://vaultwarden:<mariadb-password>@127.0.0.1:3306/vaultwarden
      into postgresql://vaultwarden:<pg-password>@127.0.0.1:15432/vaultwarden
      WITH data only
      EXCLUDING TABLE NAMES MATCHING '__diesel_schema_migrations'
@@ -550,9 +460,9 @@ EOF
 docker run --rm --network host -v /root/pgloader:/work dimitri/pgloader:latest pgloader /work/vaultwarden.load
 rm -rf /root/pgloader
 ```
-Warnings are normal. Errors usually mean an old pgloader. With **MySQL 8** (not MariaDB), pgloader can't use the default `caching_sha2_password` login: create a temporary read-only MySQL user with `mysql_native_password` for the load, and drop it afterwards.
+Warnings are normal; errors usually mean an old pgloader. Close the two tunnels afterwards.
 
-**E. Compare row counts** (MySQL on the VM vs. PostgreSQL):
+**Step 8: Compare row counts** (MariaDB on the VM vs. PostgreSQL). Every count must match:
 ```sql
 SELECT 'users', COUNT(*) FROM users UNION ALL SELECT 'ciphers', COUNT(*) FROM ciphers
 UNION ALL SELECT 'folders', COUNT(*) FROM folders UNION ALL SELECT 'attachments', COUNT(*) FROM attachments
@@ -560,67 +470,64 @@ UNION ALL SELECT 'sends', COUNT(*) FROM sends UNION ALL SELECT 'organizations', 
 UNION ALL SELECT 'twofactor', COUNT(*) FROM twofactor UNION ALL SELECT 'devices', COUNT(*) FROM devices;
 ```
 ```bash
-mysql -u vaultwarden -p vaultwarden            # VM: paste the query
+mysql -u vaultwarden -p vaultwarden                                  # VM: paste the query
 kubectl cnpg psql vaultwarden-db -n vaultwarden -- -d vaultwarden    # cluster: paste the query
 ```
-Every count must match.
 
-**F. Start Vaultwarden:**
+**Step 9: Start Vaultwarden and test it in a private browser window** (downtime ends)
 ```bash
 kubectl -n vaultwarden scale deploy/vaultwarden --replicas=1
 kubectl -n vaultwarden logs -f deploy/vaultwarden
 ```
-
-### 5.7 Test (without touching production)
-Use a **private browser window with the web vault only**. Don't point the extension or phone apps at `vault-test`, and don't change anything there: this copy is thrown away.
-
-**Done when:**
-- [ ] `https://vault-test.<tailnet>.ts.net` loads from a tailnet device (the first request can take up to a minute while the certificate is issued)
-- [ ] Login works with your usual two-step method, the item count matches, and attachments open
+- [ ] `https://vault.<tailnet>.ts.net` loads (the first request can take up to a minute while the certificate is issued)
+- [ ] Login works with your two-step method, the item count matches, an attachment opens
 - [ ] `/admin` accepts the new admin token
-- [ ] The row counts in 5.6 E match
+
+**Step 10: Switch the clients.** In the browser extension, phone apps and desktop app: log out, set the server URL to `https://vault.<tailnet>.ts.net`, log in.
+
+**Step 11: Test everything**
+- [ ] Extension autofill on a real site, phone sync
+- [ ] A new item appears live on a second client (WebSockets through the proxy)
 - [ ] The URL does **not** resolve from a device outside the tailnet
+- [ ] Re-register a WebAuthn key or passkey, if you use one
+- [ ] In `deployment.yaml`, change `replicas: 0` to `replicas: 1` and commit. Otherwise the next `kubectl apply -k` scales Vaultwarden back to 0
+
+**Step 12: Keep the old VM, its MariaDB and its data untouched for 2–4 weeks.** Set up backups (Phase 4) right away.
+
+### 5.6 If something goes wrong
+
+**Roll back** (any step): `kubectl -n vaultwarden scale deploy/vaultwarden --replicas=0`, then on the Docker VM `docker compose start vaultwarden` and restore its Serve config. Clients that were already switched go back to `https://vaultwarden.<tailnet>.ts.net`. Anything saved on the cluster in between is lost.
+
+**Retry the data load** (steps 5–8) from an empty database:
+```bash
+kubectl -n vaultwarden scale deploy/vaultwarden --replicas=0
+kubectl -n vaultwarden delete cluster vaultwarden-db     # its PVC goes too; Retain keeps the PV as "Released"
+kubectl get pv | grep vaultwarden-db                     # delete that PV by hand
+kubectl apply -k apps/vaultwarden && kubectl cnpg status vaultwarden-db -n vaultwarden
+```
+Then clear `/data` before copying it again (in the `restore` pod: `rm -rf /data/* /data/.[!.]*`).
+
+**Done when:** steps 9 and 11 pass and every client uses `https://vault.<tailnet>.ts.net`.
 
 ---
 
-## 6. Phase 4: Backups and restore drill (before going live)
+## 6. Phase 4: Backups and restore drill (right after the migration)
 
 - [ ] **Nightly CronJob** in `vaultwarden` with `ttionya/vaultwarden-backup` (supports PostgreSQL up to 18): `pg_dump` of the database plus `/data` (`rsa_key*`, `attachments/`, `sends/`, `config.json`), zipped with a password and sent off-host with rclone (B2, NAS, etc.).
   - `DB_TYPE=postgresql`, `PG_HOST=vaultwarden-db-rw`, `PG_DBNAME=vaultwarden`, `PG_USERNAME=vaultwarden`, `PG_PASSWORD` from `vaultwarden-db-app` (key `password`).
   - `ZIP_PASSWORD` and the rclone config go in a SOPS-encrypted Secret. Keep the zip password in your password manager **and somewhere outside it**.
   - It can mount the same RWO `/data` PVC because there's only one worker.
-- [ ] **Restore drill**, timed:
-  1. `kubectl delete ns vaultwarden`, then delete the `Released` PVs it leaves behind.
-  2. `kubectl apply -k apps/vaultwarden` and the secret (Deployment at 0, fresh empty database).
+- [ ] **Restore drill**, timed. Until it has worked, the old Docker VM is your only proven fallback, so don't retire it before this.
+  1. Note the item count, then `kubectl delete ns vaultwarden` and delete the `Released` PVs it leaves behind.
+  2. `kubectl apply -k apps/vaultwarden` and the secret, then **immediately** `kubectl -n vaultwarden scale deploy/vaultwarden --replicas=0`. The new database needs about a minute to initialise, so Vaultwarden can't create its schema first; check its logs to be sure.
   3. Restore the dump into the empty database and `/data` into the PVC with the backup image's restore command. **Don't start Vaultwarden before the dump is restored:** the dump contains the schema, and a pre-created schema conflicts with it.
-  4. Scale to 1 and run the 5.7 checks.
+  4. Scale to 1 and run the step 9 checks.
 
 **Done when:** a restore from the off-host backup has worked at least once.
 
 ---
 
-## 7. Phase 5: Cutover
-
-Before you start:
-- [ ] Export the vault (web vault → Tools → Export → `.json (Encrypted)`) and keep it off the cluster.
-- [ ] Check that no tailnet device is already named `vault`, or the proxy becomes `vault-1`.
-- [ ] If you use a **security key or passkey (WebAuthn)** for two-step login: it is tied to the domain and won't work on the new URL. Make sure another method (authenticator app or recovery code) works, and register the key again afterwards.
-
-1. [ ] **Stop the old service** on the Docker VM (leave MySQL running for the load):
-   ```bash
-   docker compose stop vaultwarden
-   tailscale serve reset        # or remove only Vaultwarden's handler if Serve fronts other services there
-   ```
-   Never run both at once, or the databases diverge.
-2. [ ] **Load the final data:** 5.6 A–F, from the now-stopped production. Every count in E must match.
-3. [ ] **Switch to the final name:** set `DOMAIN` to `https://vault.<tailnet>.ts.net` and the Ingress `tls.hosts` to `[vault]`, apply and commit. Delete the old `vault-test` device from the admin console if it remains.
-4. [ ] **Update each client:** in the browser extension, phone apps and desktop app, log out, change the server URL to `https://vault.<tailnet>.ts.net` and log in again.
-5. [ ] **Test:** web vault, extension autofill, phone sync, an attachment, a new item appearing live on a second client, `/admin`.
-6. [ ] **Keep the old VM, its MySQL and its data untouched for 2–4 weeks.** Rollback: scale the Deployment to 0, start the container, restore its Serve config, and point the clients back to `https://vaultwarden.<tailnet>.ts.net`. Anything changed on the cluster since the cutover is lost unless you move it back by hand.
-
----
-
-## 8. Phase 6: GitOps (Flux)
+## 7. Phase 5: GitOps (Flux)
 
 - [ ] `flux bootstrap github ...` against `talos-k8s`.
 - [ ] Give Flux the age key (`sops-age` Secret in `flux-system`).
@@ -635,7 +542,7 @@ Before you start:
 
 ---
 
-## 9. Phase 7: Drills
+## 8. Phase 6: Drills
 
 | Drill | What you learn |
 |---|---|
