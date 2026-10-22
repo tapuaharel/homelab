@@ -10,4 +10,4 @@ spec:
   defaultBackend:
     service: { name: vaultwarden, port: { number: 80 } }
   tls:
-    - hosts: [vault-test]          # → https://vault-test.taila07fc4.ts.net; "vault" at cutover
+    - hosts: [vault]          # → https://vault-test.taila07fc4.ts.net; "vault" at cutover
