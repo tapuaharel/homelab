@@ -1,4 +1,3 @@
-# PostgreSQL image pinned by digest; from cloudnative-pg/artifacts image-catalogs/catalog-minimal-trixie.yaml
 apiVersion: postgresql.cnpg.io/v1
 kind: ImageCatalog
 metadata:
@@ -16,7 +15,7 @@ metadata:
   namespace: vaultwarden
 spec:
   instances: 1
-  enablePDB: false              # single instance: a PDB would block draining the worker
+  enablePDB: false
   imageCatalogRef:
     apiGroup: postgresql.cnpg.io
     kind: ImageCatalog
@@ -25,14 +24,14 @@ spec:
   bootstrap:
     initdb:
       database: vaultwarden
-      owner: vaultwarden        # credentials in the generated Secret vaultwarden-db-app
+      owner: vaultwarden
   storage:
     storageClass: local-path
     size: 2Gi
   postgresql:
     parameters:
-      shared_buffers: 128MB     # ~25% of the memory limit
-      wal_level: replica        # no logical replication needed
-  resources:                    # requests = limits: Guaranteed QoS
+      shared_buffers: 128MB
+      wal_level: replica
+  resources:
     requests: { cpu: 500m, memory: 512Mi }
     limits:   { cpu: 500m, memory: 512Mi }

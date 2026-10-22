@@ -1,4 +1,3 @@
-# /data: rsa_key*, attachments, sends (the database lives in Postgres)
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

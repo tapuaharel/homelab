@@ -3,7 +3,6 @@ kind: Kustomization
 resources:
   - https://raw.githubusercontent.com/rancher/local-path-provisioner/v0.0.37/deploy/local-path-storage.yaml
 patches:
-  # Talos enforces "baseline" pod security; the helper pods need hostPath
   - patch: |-
       apiVersion: v1
       kind: Namespace
@@ -11,7 +10,6 @@ patches:
         name: local-path-storage
         labels:
           pod-security.kubernetes.io/enforce: privileged
-  # Default StorageClass; Retain keeps the data if a PVC is deleted (e.g. a Flux prune)
   - patch: |-
       apiVersion: storage.k8s.io/v1
       kind: StorageClass
@@ -20,7 +18,6 @@ patches:
         annotations:
           storageclass.kubernetes.io/is-default-class: "true"
       reclaimPolicy: Retain
-  # The Talos user volume on the worker (talos/patches/talos-w-1.yaml)
   - patch: |-
       apiVersion: v1
       kind: ConfigMap

@@ -2,7 +2,7 @@ machine:
   certSANs: [talos-cp-1.taila07fc4.ts.net]
 cluster:
   etcd:
-    advertisedSubnets: [10.220.20.0/24]   # keep etcd on the LAN, not tailscale0
+    advertisedSubnets: [10.220.20.0/24]
 ---
 apiVersion: v1alpha1
 kind: HostnameConfig

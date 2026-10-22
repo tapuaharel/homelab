@@ -11,14 +11,12 @@ provisioning:
   diskSelector:
     match: disk.dev_path == "/dev/sda"
 ---
-# Cap EPHEMERAL so the system disk has room for the local-path user volume
 apiVersion: v1alpha1
 kind: VolumeConfig
 name: EPHEMERAL
 provisioning:
   maxSize: 15GiB
 ---
-# Mounted at /var/mnt/local-path-provisioner
 apiVersion: v1alpha1
 kind: UserVolumeConfig
 name: local-path-provisioner
