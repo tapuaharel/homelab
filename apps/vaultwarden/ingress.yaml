@@ -1,0 +1,13 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vaultwarden
+  namespace: vaultwarden
+  annotations:
+    tailscale.com/tags: "tag:password-manager"   # own tag instead of the shared tag:k8s, so ACLs can target only this proxy
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service: { name: vaultwarden, port: { number: 80 } }
+  tls:
+    - hosts: [vault-test]          # → https://vault-test.taila07fc4.ts.net; "vault" at cutover

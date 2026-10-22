@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vaultwarden
+  namespace: vaultwarden
+spec:
+  replicas: 0                      # scaled by hand during the data load (PLAN 5.6)
+  strategy: { type: Recreate }     # RWO volume, and never two versions migrating the schema at once
+  selector: { matchLabels: { app: vaultwarden } }
+  template:
+    metadata: { labels: { app: vaultwarden } }
+    spec:
+      containers:
+        - name: vaultwarden
+          image: vaultwarden/server:1.37.4   # same as production; upgrade only after the cutover
+          env:
+            - { name: DOMAIN, value: "https://vault.taila07fc4.ts.net" }
+            - { name: SIGNUPS_ALLOWED, value: "false" }
+            - { name: TZ, value: "Asia/Jerusalem" }
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: vaultwarden-db-app, key: uri } }
+          envFrom:
+            - secretRef: { name: vaultwarden-secrets }   # ADMIN_TOKEN
+          ports: [{ name: http, containerPort: 80 }]
+          volumeMounts: [{ name: data, mountPath: /data }]
+          readinessProbe: { httpGet: { path: /alive, port: http } }
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits:   { memory: 256Mi }
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: vaultwarden-data }

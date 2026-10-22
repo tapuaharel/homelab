@@ -327,6 +327,8 @@ The rehearsal runs at `https://vault-test.<tailnet>.ts.net` with a **copy** of t
 - [ ] **Database server:** `ss -ltnp | grep 3306` (native or container?) and `mysql --version` (MariaDB or MySQL 8?). Production uses `DATABASE_URL=mysql://vaultwarden:...@127.0.0.1:3306/vaultwarden`.
 - [ ] **`/root/vaultwarden/vaultwarden-data/config.json`:** if it exists, it holds settings saved from `/admin`, and those **override environment variables** (`domain`, `admin_token`, `signups_allowed`, ...). Delete any key that is set through `env` in Kubernetes, or the rehearsal silently uses the old domain.
 
+**Recorded (2026-10-22):** Vaultwarden **1.37.4**; database is a **native MariaDB 10.11.19** on the Docker VM (`127.0.0.1:3306`), the same major version the Vaultwarden wiki tested pgloader with. The MySQL 8 authentication workaround in 5.6 D isn't needed.
+
 ### 5.2 Settings from `compose.yml`
 
 | Compose | Kubernetes |
@@ -426,7 +428,7 @@ spec:
     spec:
       containers:
         - name: vaultwarden
-          image: vaultwarden/server:<version from 5.1>
+          image: vaultwarden/server:1.37.4
           env:
             - { name: DOMAIN, value: "https://vault-test.<tailnet>.ts.net" }
             - { name: SIGNUPS_ALLOWED, value: "false" }
