@@ -1,0 +1,59 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "schedule:weekly"],
+  "ignorePaths": ["**/*.sops.yaml"],
+  "flux": {
+    "managerFilePatterns": ["/(^|/)(infrastructure|apps)/.+\\.ya?ml$/"]
+  },
+  "kubernetes": {
+    "managerFilePatterns": ["/(^|/)(infrastructure|apps)/.+\\.ya?ml$/"]
+  },
+  "customManagers": [
+    {
+      "description": "Remote manifests pulled from raw.githubusercontent.com in kustomizations",
+      "customType": "regex",
+      "managerFilePatterns": ["/(^|/)kustomization\\.ya?ml$/"],
+      "matchStrings": [
+        "https://raw\\.githubusercontent\\.com/(?<depName>[^/]+/[^/]+)/(?<currentValue>v[^/]+)/"
+      ],
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "description": "Talos installer image from the Image Factory",
+      "customType": "regex",
+      "managerFilePatterns": ["/(^|/)talos/patches/.+\\.ya?ml$/"],
+      "matchStrings": [
+        "image: factory\\.talos\\.dev/[^/]+/[a-f0-9]{64}:(?<currentValue>v[0-9.]+)"
+      ],
+      "depNameTemplate": "siderolabs/talos",
+      "datasourceTemplate": "github-releases"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Auto-merge patch and digest updates",
+      "matchUpdateTypes": ["patch", "digest"],
+      "automerge": true
+    },
+    {
+      "description": "Talos: merging only updates the patch files; nodes still need talosctl upgrade",
+      "matchDepNames": ["siderolabs/talos"],
+      "automerge": false,
+      "prBodyNotes": [
+        "Merging this does not upgrade the nodes. Upgrade each node with `talosctl upgrade --image <new installer image>`, one minor version at a time."
+      ]
+    },
+    {
+      "description": "CNPG PostgreSQL images: tags look like 18.6-202610190957-minimal-trixie",
+      "matchPackageNames": ["ghcr.io/cloudnative-pg/postgresql"],
+      "versioning": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)-(?<patch>\\d+)-(?<compatibility>.+)$",
+      "automerge": false
+    },
+    {
+      "description": "PostgreSQL major upgrades need a planned migration",
+      "matchPackageNames": ["ghcr.io/cloudnative-pg/postgresql"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
+    }
+  ]
+}
