@@ -36,6 +36,11 @@
       "automerge": true
     },
     {
+      "description": "apiVersion bumps are classed as patch but can change the resource schema",
+      "matchDatasources": ["kubernetes-api"],
+      "automerge": false
+    },
+    {
       "description": "Talos: merging only updates the patch files; nodes still need talosctl upgrade",
       "matchDepNames": ["siderolabs/talos"],
       "automerge": false,
