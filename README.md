@@ -1,4 +1,4 @@
-# talos-k8s
+# homelab
 
 Homelab Kubernetes cluster that runs [Vaultwarden](https://github.com/dani-garcia/vaultwarden). It runs on two Talos Linux VMs on Proxmox VE, Flux manages it from this repo, and it is reachable only over Tailscale.
 

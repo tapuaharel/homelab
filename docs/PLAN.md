@@ -52,13 +52,13 @@ Place the two reservations wherever the router requires them: outside the dynami
 | Storage | local-path-provisioner |
 | Database | CloudNativePG operator + one PostgreSQL 18 instance |
 | Exposure and TLS | Tailscale Kubernetes operator |
-| GitOps | Flux + SOPS/age, repo **`talos-k8s`** |
+| GitOps | Flux + SOPS/age, repo **`homelab`** |
 | Backups | Nightly CronJob (`pg_dump` + `/data`) → off-host storage |
 
 ### Repository layout
 
 ```
-talos-k8s/
+homelab/
 ├── .sops.yaml
 ├── talos/
 │   ├── patches/
@@ -527,7 +527,7 @@ Then clear `/data` before copying it again (in the `restore` pod: `rm -rf /data/
 
 ## 7. Phase 5: GitOps (Flux)
 
-Flux runs in the cluster, pulls `talos-k8s` from GitHub and makes the cluster match it. Afterwards, every change goes through git: a manual `kubectl edit` is reverted at the next sync. `talos/` stays manual (`talosctl`).
+Flux runs in the cluster, pulls `homelab` from GitHub and makes the cluster match it. Afterwards, every change goes through git: a manual `kubectl edit` is reverted at the next sync. `talos/` stays manual (`talosctl`).
 
 ### Files in the repo
 
@@ -549,7 +549,7 @@ The `HelmRelease`s use the **same release names, namespaces, chart versions and 
 flux version --client      # v2.9.6
 flux check --pre
 ```
-Create a GitHub **fine-grained token**, limited to `talos-k8s`, with **Contents: read/write** and **Administration: read/write** (to add the deploy key), expiring in 1 day. Bootstrap needs it once; afterwards Flux uses a read-only SSH deploy key.
+Create a GitHub **fine-grained token**, limited to `homelab`, with **Contents: read/write** and **Administration: read/write** (to add the deploy key), expiring in 1 day. Bootstrap needs it once; afterwards Flux uses a read-only SSH deploy key.
 ```bash
 read -s GITHUB_TOKEN && export GITHUB_TOKEN
 ```
@@ -566,7 +566,7 @@ The only secret that never goes into git; recreate it by hand after a cluster re
 ```bash
 git push                   # the files above must be on GitHub first
 flux bootstrap github \
-  --owner=tapuaharel --repository=talos-k8s --personal --private=true \
+  --owner=tapuaharel --repository=homelab --personal --private=true \
   --branch=main --path=clusters/homelab
 git pull                   # bootstrap pushed clusters/homelab/flux-system/
 unset GITHUB_TOKEN         # and delete the token on GitHub
