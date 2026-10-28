@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Secret
+metadata:
+    name: vaultwarden-backup
+    namespace: vaultwarden
+stringData:
+    ZIP_PASSWORD: ENC[AES256_GCM,data:Akq3j2eR5NSL9p1iZovzPot13NZ9,iv:unvhrRoLcJ/HR+QAYHoSkW3s41C+/F5F1KpQEFrWEh8=,tag:f/9YIslbHVTp4CMcisfM1Q==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBVSG5jVGcrb2M3b0wwTHZC
+            K2N2Z2JuYzMwUE9kNUdXSTl5MHVaS0E1NnpRCm56TTk5aWE4SHdDUVBkWWVsSVBM
+            dGhHY1U5ZDc0anFxcm5KQzZVTGxTckEKLS0tIDZUTHNEaGRtWkdoOUJ5cG1pQmtn
+            djloRkFMWTc1NHVKZU1WdGFZcFZFcTQK1h9q8/oocBDh8WNJsLjx/bKoPxZeCPdN
+            oJyyeQaueU+N5grnk/xIMdXhKHX2SCO0g1ENU1mrclVlsrJd54XNwA==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1hr3enuhkuy8txv3u779pa789f2vsasn2z959tgwhy52r7cdhdershlhxdf
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-10-28T15:10:03Z"
+    mac: ENC[AES256_GCM,data:iR8gpD2xZZQu8PH9nChbZUm7f+ftuEuY6CN00Q8hpnwVy5hWAkiITTisW8zV7BV7m5wxgm5QtIximGyf7X1DacavZ0QKCWqm5+s1i33cPhbxeIJXIzv6ccoauxN84NvesVHU3FNfreab3QK694MYyhBt/Jabj1PRh7HUf4pQ2mA=,iv:FRnFRA4f4t4Ji7HRgAyRlnm1LwjFBOi3yVWmimBT7B4=,tag:5e9YogYweS0DL8JkDatXLA==,type:str]
+    version: 3.13.3
