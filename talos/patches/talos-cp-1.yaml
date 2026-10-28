@@ -12,7 +12,7 @@ hostname: talos-cp-1
 apiVersion: v1alpha1
 kind: UnattendedInstallConfig
 installer:
-  image: factory.talos.dev/nocloud-installer/780d976716e800d05604b9dd8d41928a97c1ad38f36d4c8276d35984aa947865:v1.14.4
+  image: factory.talos.dev/nocloud-installer/780d976716e800d05604b9dd8d41928a97c1ad38f36d4c8276d35984aa947865:v1.14.5
 provisioning:
   diskSelector:
     match: disk.dev_path == "/dev/sda"
