@@ -48,7 +48,7 @@ resource "proxmox_virtual_environment_vm" "node" {
 
   network_device {
     bridge      = "vmbr0"
-    mac_address = each.value.mac # the router's DHCP reservations depend on it
+    mac_address = each.value.mac
     firewall    = true
   }
 
