@@ -14,13 +14,16 @@ Flux pulls the `main` branch and applies `infrastructure/` first, then `apps/`. 
 
 The apps layer deploys Vaultwarden with a single-instance PostgreSQL 18 database. Tailnet devices reach it at `https://vault.<tailnet>.ts.net`.
 
-SOPS and age encrypt the secrets in git, and Flux decrypts them in the cluster. Renovate opens weekly PRs for chart, image and Talos version updates. Flux doesn't manage the Talos config in `talos/`. You apply it by hand with `talosctl`.
+SOPS and age encrypt the secrets in git, and Flux decrypts them in the cluster. Renovate opens weekly PRs for chart, image, Talos and OpenTofu provider updates.
+
+Flux doesn't manage the Talos layer. OpenTofu does, from `tofu/`, run by hand from the workstation. It manages the two Proxmox VMs, builds each node's config from the patches in `talos/` and applies it, and upgrades a node when its installer image changes. It reads the Talos secrets from SOPS each run and never writes them to state.
 
 ## Layout
 
 | Path | Contents |
 |---|---|
 | `talos/` | Talos machine config patches and encrypted cluster secrets |
+| `tofu/` | OpenTofu for the Proxmox VMs and Talos nodes |
 | `clusters/homelab/` | Flux bootstrap and the Kustomizations for `infrastructure/` and `apps/` |
 | `infrastructure/` | local-path-provisioner, Tailscale operator, CloudNativePG operator |
 | `apps/` | Vaultwarden and its database |

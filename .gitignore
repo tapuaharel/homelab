@@ -6,3 +6,6 @@ kubeconfig
 *.agekey
 keys.txt
 *.dec.yaml
+tofu/.terraform/
+tofu/*.tfstate
+tofu/*.tfstate.*

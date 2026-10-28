@@ -41,11 +41,12 @@
       "automerge": false
     },
     {
-      "description": "Talos: merging only updates the patch files; nodes still need talosctl upgrade",
+      "description": "Talos OS: merging only updates the patch files; nodes upgrade on the next tofu apply",
+      "matchDatasources": ["github-releases"],
       "matchDepNames": ["siderolabs/talos"],
       "automerge": false,
       "prBodyNotes": [
-        "Merging this does not upgrade the nodes. Upgrade each node with `talosctl upgrade --image <new installer image>`, one minor version at a time."
+        "Merging this does not upgrade the nodes. Run `tofu apply -parallelism=1` in `tofu/`, one Talos minor version at a time."
       ]
     },
     {

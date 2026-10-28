@@ -67,6 +67,7 @@ homelab/
 │   │   ├── talos-cp-1.sops.yaml      # Tailscale auth key (encrypted)
 │   │   └── talos-w-1.yaml            # hostname, installer image, local-path user volume
 │   └── secrets.sops.yaml
+├── tofu/                             # OpenTofu: Proxmox VMs, Talos config, OS upgrades (Phase 7)
 ├── clusters/homelab/                 # Flux: flux-system/ (bootstrap), infrastructure.yaml, apps.yaml
 ├── infrastructure/
 │   ├── local-path-provisioner/
@@ -617,3 +618,88 @@ Check worker RAM in `talosctl -n 10.220.20.57 dashboard`; the Flux controllers a
 | CNPG operator upgrade (bump the chart version in git) | Operator upgrades restart the instance: a short database outage with one instance |
 | PostgreSQL minor update (new digest in the `ImageCatalog`) | How CNPG rolls out a new image |
 | Delete both VMs, recreate them (Phase 0), re-run Phase 1 steps 2–4, let Flux rebuild, and restore the backup | Whether everything can be rebuilt from the repo and backups alone |
+
+---
+
+## 9. Phase 7: Manage the Talos layer with OpenTofu
+
+OpenTofu takes over the Proxmox VMs, the Talos machine configs and OS upgrades. The patches in `talos/` stay the source of truth. Tofu reads `talos/secrets.sops.yaml` and the Tailscale patch through SOPS on every run, and passes them on only through ephemeral resources and write-only arguments, so the state file holds no secrets. If the state is lost, re-run the imports in step 3.
+
+| Tofu resource | Replaces |
+|---|---|
+| `proxmox_virtual_environment_vm` (imported) | The `qm set` commands in Phase 0 |
+| `talos_machine` | `talosctl machineconfig patch` + `apply-config`, and `talosctl upgrade` (changing `image` upgrades the node) |
+| `talos_machine_bootstrap` (imported) | `talosctl bootstrap` |
+
+Kubernetes upgrades stay manual: run `talosctl upgrade-k8s`, then bump `kubernetes_version` in `tofu/talos.tf` to match.
+
+### Step 1: Prerequisites
+
+- [ ] Install OpenTofu ≥ 1.11.
+- [ ] Create a Proxmox user and API token for OpenTofu. On the Proxmox host, as root:
+  ```bash
+  # On PVE 8, use VM.Monitor instead of VM.GuestAgent.Audit
+  pveum role add OpenTofu -privs "VM.Audit VM.Allocate VM.PowerMgmt VM.GuestAgent.Audit \
+    VM.Config.CPU VM.Config.Memory VM.Config.Disk VM.Config.Network VM.Config.Options \
+    VM.Config.HWType VM.Config.CDROM Datastore.Audit Datastore.AllocateSpace SDN.Audit SDN.Use Sys.Audit"
+  pveum user add opentofu@pve
+  pveum acl modify / -user opentofu@pve -role OpenTofu
+  pveum user token add opentofu@pve homelab --privsep 0   # prints the secret once
+  ```
+  Then export the token on the workstation:
+  ```bash
+  export PROXMOX_VE_ENDPOINT=https://<pve-address>:8006/
+  export PROXMOX_VE_API_TOKEN='opentofu@pve!homelab=<secret>'
+  ```
+- [ ] `cd tofu && tofu init`, then commit `.terraform.lock.hcl`.
+
+### Step 2: Check that the generated config matches the running nodes
+
+`talos_machine` applies config in `AUTO` mode and has no dry-run, so the first apply must not change anything. `talosctl` uses the same config generator as the provider, so a dry-run with the same inputs shows what the first apply would do:
+```bash
+cd talos
+talosctl gen config homelab https://10.220.20.56:6443 --with-secrets <(sops -d secrets.sops.yaml) \
+  --talos-version v1.14 --kubernetes-version v1.37.1 --output-types controlplane -o - \
+| talosctl machineconfig patch /dev/stdin --patch @patches/common.yaml --patch @patches/talos-cp-1.yaml \
+    --patch @<(sops -d patches/talos-cp-1.sops.yaml) \
+| talosctl -n 10.220.20.56 apply-config --dry-run --file /dev/stdin
+
+talosctl gen config homelab https://10.220.20.56:6443 --with-secrets <(sops -d secrets.sops.yaml) \
+  --talos-version v1.14 --kubernetes-version v1.37.1 --output-types worker -o - \
+| talosctl machineconfig patch /dev/stdin --patch @patches/common.yaml --patch @patches/talos-w-1.yaml \
+| talosctl -n 10.220.20.57 apply-config --dry-run --file /dev/stdin
+```
+Both must report no changes. If a field differs, pin it in a patch or in `tofu/talos.tf` before going on.
+
+### Step 3: Import
+
+```bash
+cd tofu
+tofu plan -generate-config-out=vms.tf   # writes the VM blocks from what Proxmox reports
+```
+Edit `vms.tf`: drop read-only and default-valued attributes, and add `lifecycle { prevent_destroy = true }` to both VMs. Repeat `tofu plan` until it shows only the three imports and two `talos_machine` creates.
+
+### Step 4: First apply
+
+```bash
+tofu apply -parallelism=1
+```
+`talos_machine` has no import, so this "creates" it by applying the config checked in step 2. The running image already matches, so no upgrade runs. Afterwards, delete `imports.tf`, check that `tofu plan` reports no changes, and commit.
+
+**Done when:**
+- [ ] `tofu plan` reports no changes
+- [ ] A test edit to a patch shows up in `tofu plan` (then revert it)
+- [ ] `tofu show` contains no keys or tokens
+
+### Day to day
+
+| You want to... | Do this |
+|---|---|
+| Change a Talos patch | Edit, `tofu apply -parallelism=1`, commit |
+| Upgrade Talos (Renovate PR) | Merge, pull, `tofu apply -parallelism=1`: drains, upgrades and reboots each node in turn |
+| Upgrade Kubernetes | `talosctl upgrade-k8s --to <version>`, then bump `kubernetes_version` and `tofu apply` |
+| Resize a VM | Edit `vms.tf`, `tofu apply` |
+
+> ⚠️ Never set `on_destroy { reset = true }` on `talos_machine`. Without it, removing the resource leaves the node running.
+
+> ℹ️ Rebuilding from empty VMs isn't automated through cloud-init. A snippet would hold the full machine config, and the Proxmox provider can't upload it without writing it to state. New VMs boot into maintenance mode instead, and `talos_machine` configures them over the LAN. That apply must run from a machine on `10.220.20.0/24`, with `endpoint` set to each node's IP.
