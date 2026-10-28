@@ -651,6 +651,11 @@ Kubernetes upgrades stay manual: run `talosctl upgrade-k8s`, then bump `kubernet
   export PROXMOX_VE_ENDPOINT=https://<pve-address>:8006/
   export PROXMOX_VE_API_TOKEN='opentofu@pve!homelab=<secret>'
   ```
+- [ ] Trust the Proxmox CA on the workstation; the API certificate is signed by it, not by a public CA:
+  ```bash
+  ssh root@pve cat /etc/pve/pve-root-ca.pem | sudo tee /usr/local/share/ca-certificates/pve-root-ca.crt
+  sudo update-ca-certificates
+  ```
 - [ ] `cd tofu && tofu init`, then commit `.terraform.lock.hcl`.
 
 ### Step 2: Check that the generated config matches the running nodes
@@ -673,18 +678,23 @@ Both must report no changes. If a field differs, pin it in a patch or in `tofu/t
 
 ### Step 3: Import
 
+`tofu/vms.tf` describes VMs 105 and 106 as they are on Proxmox. Remove the leftover cloud-init settings first (Phase 1 step 4 meant to delete them; the provider removes `ipconfig0` but not `cicustom`), then import:
 ```bash
+ssh root@pve 'qm set 105 --delete cicustom,ipconfig0; qm set 106 --delete cicustom,ipconfig0'
 cd tofu
-tofu plan -generate-config-out=vms.tf   # writes the VM blocks from what Proxmox reports
+tofu import 'proxmox_virtual_environment_vm.node["talos-cp-1"]' pve/105
+tofu import 'proxmox_virtual_environment_vm.node["talos-w-1"]' pve/106
+tofu import talos_machine_bootstrap.this done   # any ID works; marks the cluster as bootstrapped
+tofu plan
 ```
-Edit `vms.tf`: drop read-only and default-valued attributes, and add `lifecycle { prevent_destroy = true }` to both VMs. Repeat `tofu plan` until it shows only the three imports and two `talos_machine` creates.
+The plan should show only the two `talos_machine` creates and the bootstrap state update. Adjust `vms.tf` if it shows VM changes.
 
 ### Step 4: First apply
 
 ```bash
 tofu apply -parallelism=1
 ```
-`talos_machine` has no import, so this "creates" it by applying the config checked in step 2. The running image already matches, so no upgrade runs. Afterwards, delete `imports.tf`, check that `tofu plan` reports no changes, and commit.
+`talos_machine` has no import, so this "creates" it by applying the config checked in step 2. The running image already matches, so no upgrade runs. Afterwards, check that `tofu plan` reports no changes.
 
 **Done when:**
 - [ ] `tofu plan` reports no changes
