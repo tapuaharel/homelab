@@ -1,4 +1,4 @@
-# homelab
+# Homelab
 
 Homelab infrastructure built with OpenTofu and managed with GitOps using Flux and Renovate. Powered by Talos Linux VMs on Proxmox VE.
 
