@@ -2,7 +2,7 @@
 
 Homelab infrastructure built with OpenTofu and managed with GitOps using Flux and Renovate. Powered by Talos Linux VMs on Proxmox VE.
 
-## How it works
+## Overview
 
 The cluster has one control-plane node, `talos-cp-1`, and one worker node, `talos-w-1`. Each node reads its Talos config from cloud-init on first boot. The control plane joins the tailnet through the Tailscale system extension, so `talosctl` and `kubectl` work from any device on the tailnet. The worker stays on the LAN and runs every workload.
 
