@@ -79,13 +79,13 @@ Run the commands from the repository root on your workstation, unless a section 
 
 Install these tools on the workstation:
 
-- [talosctl](https://www.talos.dev/latest/talos-guides/install/talosctl/), the same minor version of Talos
-- [kubectl](https://kubernetes.io/docs/tasks/tools/), within one minor version of Kubernetes
-- [Flux CLI](https://fluxcd.io/flux/installation/#install-the-flux-cli), the version on the first line of `clusters/homelab/flux-system/gotk-components.yaml`
+- [talosctl](https://www.talos.dev/latest/talos-guides/install/talosctl/) at the same minor version of Talos
+- [kubectl](https://kubernetes.io/docs/tasks/tools/) within one minor version of Kubernetes
+- [Flux CLI](https://fluxcd.io/flux/installation/#install-the-flux-cli)
 - [OpenTofu](https://opentofu.org/docs/intro/install/)
 - [SOPS](https://github.com/getsops/sops#download)
 - [age](https://github.com/FiloSottile/age#installation)
-- The [kubectl cnpg plugin](https://cloudnative-pg.io/documentation/current/kubectl-plugin/) at the same version as the CloudNativePG operator, if you want `kubectl cnpg status` and `kubectl cnpg psql`
+- [kubectl cnpg plugin](https://cloudnative-pg.io/documentation/current/kubectl-plugin/) at the same version as the CNPG operator
 
 > Note: With a Flux CLI version that differs from the manifests, `flux bootstrap` commits a Flux upgrade.
 
