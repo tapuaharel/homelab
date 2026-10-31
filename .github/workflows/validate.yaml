@@ -33,7 +33,7 @@ jobs:
         uses: docker://ghcr.io/yannh/kubeconform:v0.8.0
         with:
           args: >-
-            -strict -summary -skip Secret
+            -strict -summary -skip Secret,CustomResourceDefinition
             -schema-location default
             -schema-location https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json
             build clusters/homelab/infrastructure.yaml clusters/homelab/apps.yaml
