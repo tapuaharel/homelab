@@ -1,0 +1,51 @@
+name: validate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check that SOPS files are encrypted
+        run: |
+          status=0
+          for f in $(git ls-files -- '*.sops.yaml' ':!:.sops.yaml'); do
+            grep -q '^sops:' "$f" || { echo "::error file=$f::not encrypted with SOPS"; status=1; }
+          done
+          exit $status
+
+      - name: Build kustomizations
+        run: |
+          mkdir build
+          kubectl kustomize infrastructure > build/infrastructure.yaml
+          kubectl kustomize apps > build/apps.yaml
+          kubectl kustomize clusters/homelab/flux-system > build/flux-system.yaml
+
+      - name: Validate manifests
+        uses: docker://ghcr.io/yannh/kubeconform:v0.8.0
+        with:
+          args: >-
+            -strict -summary -skip Secret
+            -schema-location default
+            -schema-location https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json
+            build clusters/homelab/infrastructure.yaml clusters/homelab/apps.yaml
+
+  tofu:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tofu
+    steps:
+      - uses: actions/checkout@v7
+      - uses: opentofu/setup-opentofu@v2
+      - run: tofu fmt -check -recursive
+      - run: tofu init -backend=false -input=false
+      - run: tofu validate

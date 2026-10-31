@@ -14,7 +14,7 @@ Flux pulls the `main` branch and applies `infrastructure/` first, then `apps/`. 
 
 The apps layer deploys Vaultwarden with a single-instance PostgreSQL 18 database. Tailnet devices reach it at `https://vault.<tailnet>.ts.net`.
 
-SOPS and age encrypt the secrets in git, and Flux decrypts them in the cluster. Renovate opens weekly PRs for chart, image, Talos and OpenTofu provider updates.
+SOPS and age encrypt the secrets in git, and Flux decrypts them in the cluster. Renovate opens weekly PRs for chart, image, Talos and OpenTofu provider updates. A GitHub Actions workflow validates the manifests and the OpenTofu config on every PR and push to `main`, and Renovate auto-merges only when it passes.
 
 OpenTofu manages the Talos layer. You run it by hand from `tofu/` on the workstation. It manages the two Proxmox VMs, builds each node's config from the patches in `talos/`, applies it, and upgrades a node when its installer image changes. It reads the Talos secrets from SOPS on each run and never writes them to state.
 
