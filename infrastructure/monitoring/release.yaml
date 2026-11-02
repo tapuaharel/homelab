@@ -26,7 +26,6 @@ spec:
     kubeEtcd: { enabled: false }
     kubeProxy: { enabled: false }
 
-    # No notification target yet. Alerts still show in Prometheus and Grafana.
     alertmanager:
       enabled: false
     defaultRules:
