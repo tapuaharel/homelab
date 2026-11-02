@@ -60,11 +60,11 @@ Run the commands from the repository root on your workstation, unless a section 
     "tag:k8s-operator":     ["autogroup:admin"],
     "tag:k8s":              ["tag:k8s-operator"],
     "tag:password-manager": ["tag:k8s-operator"],
-    "tag:monitoring":       ["tag:k8s-operator"],
+    "tag:monitor":          ["tag:k8s-operator"],
   },
   ```
 
-  If the policy is not allow-all, also allow your user `tcp:50000,6443` to `tag:talos` and `tcp:443` to `tag:password-manager` and `tag:monitoring`.
+  If the policy is not allow-all, also allow your user `tcp:50000,6443` to `tag:talos` and `tcp:443` to `tag:password-manager` and `tag:monitor`.
 - A valid auth key in `talos/patches/talos-cp-1.sops.yaml`. The key must be reusable, pre-approved, not ephemeral, and tagged `tag:talos`.
 - The workstation joined to the tailnet.
 
