@@ -3,6 +3,7 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - postgres.yaml
+  - podmonitor.yaml
   - pvc.yaml
   - deployment.yaml
   - service.yaml
