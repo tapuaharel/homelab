@@ -12,7 +12,7 @@ spec:
     spec:
       containers:
         - name: vaultwarden
-          image: vaultwarden/server:1.37.4
+          image: vaultwarden/server:1.37.5
           env:
             - { name: DOMAIN, value: "https://vault.taila07fc4.ts.net" }
             - { name: SIGNUPS_ALLOWED, value: "false" }
