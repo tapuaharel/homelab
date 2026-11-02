@@ -1,0 +1,93 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: kube-prometheus-stack
+  namespace: monitoring
+spec:
+  interval: 1h
+  releaseName: kube-prometheus-stack
+  chart:
+    spec:
+      chart: kube-prometheus-stack
+      version: 92.17.0
+      sourceRef:
+        kind: HelmRepository
+        name: prometheus-community
+  install:
+    crds: CreateReplace
+  upgrade:
+    crds: CreateReplace
+  values:
+    # Control-plane components aren't scraped: on Talos they only listen on
+    # localhost, and only app and resource metrics are wanted here.
+    kubeApiServer: { enabled: false }
+    kubeControllerManager: { enabled: false }
+    kubeScheduler: { enabled: false }
+    kubeEtcd: { enabled: false }
+    kubeProxy: { enabled: false }
+
+    # No notification target yet. Alerts still show in Prometheus and Grafana.
+    alertmanager:
+      enabled: false
+    defaultRules:
+      rules:
+        alertmanager: false
+      # These only make sense with an Alertmanager and would always fire without one.
+      disabled:
+        PrometheusNotConnectedToAlertmanagers: true
+        Watchdog: true
+        InfoInhibitor: true
+
+    nodeExporter:
+      operatingSystems:
+        aix: { enabled: false }
+        darwin: { enabled: false }
+
+    grafana:
+      admin:
+        existingSecret: grafana-admin
+      # Stateless: dashboards come from the chart and from ConfigMaps in git.
+      persistence:
+        enabled: false
+      grafana.ini:
+        auth.anonymous:
+          enabled: false
+      resources:
+        requests: { cpu: 50m, memory: 128Mi }
+        limits:   { memory: 256Mi }
+
+    prometheusOperator:
+      resources:
+        requests: { cpu: 50m, memory: 64Mi }
+        limits:   { memory: 128Mi }
+
+    kube-state-metrics:
+      resources:
+        requests: { cpu: 20m, memory: 64Mi }
+        limits:   { memory: 128Mi }
+
+    prometheus-node-exporter:
+      resources:
+        requests: { cpu: 20m, memory: 32Mi }
+        limits:   { memory: 64Mi }
+
+    prometheus:
+      prometheusSpec:
+        retention: 7d
+        # local-path doesn't enforce PVC sizes, so this is the real cap.
+        retentionSize: 3GB
+        # Pick up monitors and rules from every namespace, not only this release's.
+        serviceMonitorSelectorNilUsesHelmValues: false
+        podMonitorSelectorNilUsesHelmValues: false
+        ruleSelectorNilUsesHelmValues: false
+        probeSelectorNilUsesHelmValues: false
+        scrapeConfigSelectorNilUsesHelmValues: false
+        storageSpec:
+          volumeClaimTemplate:
+            spec:
+              storageClassName: local-path
+              accessModes: [ReadWriteOnce]
+              resources: { requests: { storage: 5Gi } }
+        resources:
+          requests: { cpu: 100m, memory: 512Mi }
+          limits:   { memory: 1Gi }

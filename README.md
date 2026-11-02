@@ -6,13 +6,14 @@ Homelab infrastructure built with OpenTofu and managed with GitOps using Flux an
 
 The cluster has one control-plane node, `talos-cp-1`, and one worker node, `talos-w-1`. Each node reads its Talos config from cloud-init on first boot. The control plane joins the tailnet through the Tailscale system extension, so `talosctl` and `kubectl` work from any device on the tailnet. The worker stays on the LAN and runs every workload.
 
-Flux pulls the `main` branch and applies `infrastructure/` first, then `apps/`. The infrastructure layer installs three components:
+Flux pulls the `main` branch and applies `infrastructure/` first, then `apps/`. The infrastructure layer installs four components:
 
 - local-path-provisioner, which stores volumes on a Talos user volume on the worker
 - the Tailscale operator, which publishes apps on the tailnet with Tailscale-issued certificates
 - the CloudNativePG operator, which runs PostgreSQL
+- kube-prometheus-stack, which collects pod, workload and node metrics with Prometheus and shows them in Grafana at `https://grafana.<tailnet>.ts.net`. It skips control-plane metrics and runs without Alertmanager
 
-The apps layer deploys Vaultwarden with a single-instance PostgreSQL 18 database. Tailnet devices reach it at `https://vault.<tailnet>.ts.net`.
+The apps layer deploys Vaultwarden with a single-instance PostgreSQL 18 database, which Prometheus scrapes through a `PodMonitor`. Tailnet devices reach it at `https://vault.<tailnet>.ts.net`.
 
 SOPS and age encrypt the secrets in git, and Flux decrypts them in the cluster. Renovate opens weekly PRs for chart, image, Talos and OpenTofu provider updates. A GitHub Actions workflow validates the manifests and the OpenTofu config on every PR and push to `main`, and Renovate auto-merges only when it passes.
 
@@ -25,7 +26,7 @@ OpenTofu manages the Talos layer. You run it by hand from `tofu/` on the worksta
 | `talos/` | Talos machine config patches and encrypted cluster secrets |
 | `tofu/` | OpenTofu for the Proxmox VMs and Talos nodes |
 | `clusters/homelab/` | Flux bootstrap and the Kustomizations for `infrastructure/` and `apps/` |
-| `infrastructure/` | local-path-provisioner, Tailscale operator, CloudNativePG operator |
+| `infrastructure/` | local-path-provisioner, Tailscale operator, CloudNativePG operator, kube-prometheus-stack |
 | `apps/` | Vaultwarden and its database |
 | `docs/PLAN.md` | Build and migration runbook |
 
@@ -59,10 +60,11 @@ Run the commands from the repository root on your workstation, unless a section 
     "tag:k8s-operator":     ["autogroup:admin"],
     "tag:k8s":              ["tag:k8s-operator"],
     "tag:password-manager": ["tag:k8s-operator"],
+    "tag:monitoring":       ["tag:k8s-operator"],
   },
   ```
 
-  If the policy is not allow-all, also allow your user `tcp:50000,6443` to `tag:talos` and `tcp:443` to `tag:password-manager`.
+  If the policy is not allow-all, also allow your user `tcp:50000,6443` to `tag:talos` and `tcp:443` to `tag:password-manager` and `tag:monitoring`.
 - A valid auth key in `talos/patches/talos-cp-1.sops.yaml`. The key must be reusable, pre-approved, not ephemeral, and tagged `tag:talos`.
 - The workstation joined to the tailnet.
 
@@ -311,6 +313,7 @@ To run the cluster with your own keys and network, fork the repository and chang
 | Tailscale operator OAuth client | `infrastructure/tailscale-operator/operator-oauth.sops.yaml` |
 | Vaultwarden admin token | `apps/vaultwarden/vaultwarden-secrets.sops.yaml` |
 | Backup archive password | `apps/vaultwarden/vaultwarden-backup.sops.yaml` |
+| Grafana admin password | `infrastructure/monitoring/grafana-admin.sops.yaml` |
 | Tailnet name | `talos/patches/talos-cp-1.yaml`, `tofu/talos.tf`, `apps/vaultwarden/deployment.yaml` |
 | LAN subnet and node IPs | `talos/patches/common.yaml`, `talos/patches/talos-cp-1.yaml`, `tofu/talos.tf` |
 | Proxmox node, datastore, bridge, VM IDs and MAC addresses | `tofu/vms.tf` |

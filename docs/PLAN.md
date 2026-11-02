@@ -15,7 +15,7 @@
 | Database | **CloudNativePG**, PostgreSQL 18, one instance. Data migrated from the current MySQL with pgloader | Declarative Postgres managed by an operator; learning goal. Deviations from CNPG's multi-node best practices are listed in Phase 3 |
 | Database backups | Nightly logical dump (`pg_dump`) + `/data`, off-host | Keeps cert-manager out; no point-in-time recovery |
 | DNS | MagicDNS only | No local or public DNS records |
-| Not used | Own domain, Traefik, Gateway API, cert-manager (and so CNPG's Barman Cloud backup plugin), MetalLB, metrics-server, Prometheus, Renovate, vzdump | Not needed for a tailnet-only `ts.net` setup |
+| Not used | Own domain, Traefik, Gateway API, cert-manager (and so CNPG's Barman Cloud backup plugin), MetalLB, metrics-server, Renovate, vzdump | Not needed for a tailnet-only `ts.net` setup |
 
 ---
 
@@ -363,7 +363,6 @@ Don't save settings on the `/admin` settings pages afterwards: that writes `conf
 | PodDisruptionBudgets on | `enablePDB: false` | CNPG docs: required for single-instance clusters, otherwise the node can't be drained (Talos upgrades hang) |
 | Separate WAL volume (`walStorage`) | One volume | Same disk underneath and local-path doesn't enforce sizes, so a split adds nothing |
 | Physical backups: Barman Cloud plugin, WAL archiving, PITR | Nightly logical dump (Phase 4) | No cert-manager; restores go back to the last dump, not to any second |
-| Monitoring with `PodMonitor` | `kubectl cnpg status` | No Prometheus in this cluster |
 | `NetworkPolicy` limiting who can reach Postgres | None | Flannel doesn't enforce NetworkPolicy |
 
 ### 5.4 Manifests (`apps/vaultwarden/`)
