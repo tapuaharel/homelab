@@ -8,7 +8,7 @@ terraform {
     }
     proxmox = {
       source  = "bpg/proxmox"
-      version = "~> 0.120"
+      version = "~> 0.121"
     }
     sops = {
       source  = "carlpett/sops"
