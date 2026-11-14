@@ -27,7 +27,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: backup
-              image: ttionya/vaultwarden-backup:1.27.2
+              image: ttionya/vaultwarden-backup:1.27.3
               args: [backup]
               env:
                 - { name: TZ, value: "Asia/Jerusalem" }
