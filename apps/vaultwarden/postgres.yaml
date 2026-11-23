@@ -6,7 +6,7 @@ metadata:
 spec:
   images:
     - major: 18
-      image: ghcr.io/cloudnative-pg/postgresql:18.7-202611201711-minimal-trixie@sha256:635bfde0a4ce2a04daad754e1ad37fb95ae096c8153b37fe1a4561b5ea417e38
+      image: ghcr.io/cloudnative-pg/postgresql:18.7-202611230809-minimal-trixie@sha256:c8caac9817d2b5e5e66297a3ccf86d9fcbd68f097aa6cc00161d83f9635e88cc
 ---
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
